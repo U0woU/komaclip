@@ -4,6 +4,81 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>KomaClip — 勉強タイムラプス</title>
+  <script>
+// ===== エラー自動検知＆確認パネル（KomaClip Guard） =====
+(function () {
+  const hints = [
+    { match: /is null|Cannot read properties of null/i, msg: 'HTMLとJSのバージョンズレ（ID不足）またはブラウザキャッシュの可能性があります。Ctrl+Shift+Rで再読み込みしてください。' },
+    { match: /allocate videosource|NotReadableError/i, msg: 'カメラが他のアプリや別タブで使用中です。Zoomや別タブを閉じて再接続してください。' },
+    { match: /NotAllowedError|Permission denied/i, msg: 'カメラのアクセス権限が拒否されています。アドレスバー左のアイコンから許可してください。' },
+    { match: /firstTimestampBehavior|mp4-muxer/i, msg: 'MP4エンコードのタイムスタンプ設定エラーです。Muxer設定を確認してください。' },
+    { match: /IndexedDB|QuotaExceededError/i, msg: 'ブラウザの保存容量不足、またはプライベートブラウズによる保存制限の可能性があります。' }
+  ];
+
+  function createPanel() {
+    let box = document.getElementById('kc-error-box');
+    if (box) return box;
+    box = document.createElement('div');
+    box.id = 'kc-error-box';
+    box.style.cssText = [
+      'position:fixed', 'right:16px', 'bottom:16px', 'z-index:99999',
+      'width:min(420px, calc(100vw - 32px))', 'max-height:50vh', 'overflow:auto',
+      'background:#1a1016', 'color:#ffe4e8', 'border:1px solid #ff4757',
+      'border-radius:14px', 'padding:14px', 'font-family:sans-serif',
+      'font-size:12px', 'box-shadow:0 12px 32px rgba(0,0,0,0.45)', 'display:grid', 'gap:8px'
+    ].join(';');
+    box.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <strong style="color:#ff6b81;">⚠️ エラーを検知しました</strong>
+        <div style="display:flex;gap:6px;">
+          <button id="kc-err-copy" style="padding:4px 10px;border-radius:999px;border:none;background:#ff4757;color:#fff;font-size:11px;font-weight:700;cursor:pointer;">コピー</button>
+          <button id="kc-err-close" style="padding:4px 10px;border-radius:999px;border:1px solid #555;background:transparent;color:#ccc;font-size:11px;cursor:pointer;">閉じる</button>
+        </div>
+      </div>
+      <div id="kc-err-hint" style="background:rgba(255,176,32,0.14);color:#ffd166;padding:8px;border-radius:8px;display:none;"></div>
+      <pre id="kc-err-log" style="margin:0;white-space:pre-wrap;word-break:break-all;background:rgba(0,0,0,0.35);padding:8px;border-radius:8px;font-size:11px;color:#ffb8c2;"></pre>
+    `;
+    (document.body || document.documentElement).appendChild(box);
+    box.querySelector('#kc-err-close').onclick = () => box.remove();
+    box.querySelector('#kc-err-copy').onclick = () => {
+      const text = box.querySelector('#kc-err-log').textContent;
+      navigator.clipboard?.writeText(text).then(() => {
+        box.querySelector('#kc-err-copy').textContent = 'コピー済';
+        setTimeout(() => { const b = box.querySelector('#kc-err-copy'); if (b) b.textContent = 'コピー'; }, 1500);
+      });
+    };
+    return box;
+  }
+
+  function showError(summary, detail) {
+    const box = createPanel();
+    const fullText = `[${new Date().toLocaleTimeString()}] ${summary}\n${detail}`;
+    const logEl = box.querySelector('#kc-err-log');
+    logEl.textContent = logEl.textContent ? `${logEl.textContent}\n---\n${fullText}` : fullText;
+
+    const matched = hints.find(h => h.match.test(fullText));
+    const hintEl = box.querySelector('#kc-err-hint');
+    if (matched) {
+      hintEl.textContent = '💡 目安: ' + matched.msg;
+      hintEl.style.display = 'block';
+    }
+  }
+
+  // 通常のJSエラー・構文エラー
+  window.addEventListener('error', (e) => {
+    const loc = e.filename ? `${e.filename}:${e.lineno}:${e.colno}` : 'unknown';
+    showError(e.message || 'Script Error', `場所: ${loc}`);
+  });
+
+  // async / await や Promise 内の未処理エラー
+  window.addEventListener('unhandledrejection', (e) => {
+    const reason = e.reason;
+    const msg = reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason);
+    const stack = reason instanceof Error && reason.stack ? reason.stack.split('\n').slice(0, 3).join('\n') : '';
+    showError('非同期エラー (Promise)', `${msg}\n${stack}`);
+  });
+})();
+</script>
   <link rel="stylesheet" href="./style.css?v=3">
 </head>
 <body>
