@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja" data-theme="dark">
+<html lang="ja" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -8,106 +8,98 @@
 </head>
 <body>
 <div class="shell">
-  <!-- Left Sidebar -->
+  <!-- Left Slim Icon Sidebar -->
   <aside class="sidebar">
-    <div class="brand">
-      <div class="brand-logo">K</div>
-      <div class="brand-name">KomaClip</div>
-      <div class="brand-sub">勉強タイムラプス</div>
-    </div>
-
     <nav class="side-nav">
-      <button class="nav-item active" data-tab="record">📷 録画</button>
-      <button class="nav-item" data-tab="edit">✂️ 編集</button>
-      <button class="nav-item" data-tab="settings">⚙️ 設定</button>
-      <button class="nav-item" data-tab="info">ℹ️ 情報</button>
+      <button class="nav-item active" data-tab="record" title="録画">
+        <span class="ico">🎬</span>
+      </button>
+      <button class="nav-item" data-tab="edit" title="編集">
+        <span class="ico">✂️</span>
+      </button>
+      <button class="nav-item" data-tab="settings" title="設定">
+        <span class="ico">⚙️</span>
+      </button>
+      <button class="nav-item" data-tab="info" title="情報">
+        <span class="ico">ℹ️</span>
+      </button>
     </nav>
-
-    <div class="sidebar-footer">
-      <label class="theme-switch">
-        <span>🌙 ダーク</span>
-        <input type="checkbox" id="themeToggle" checked>
-        <span class="slider"></span>
-      </label>
-    </div>
   </aside>
 
   <!-- Main Workspace -->
   <div class="main">
-    <!-- Top Tab Bar -->
+    <!-- Minimal Topbar -->
     <header class="topbar">
-      <div class="top-tabs">
-        <button class="top-tab active" data-tab="record">📷 録画</button>
-        <button class="top-tab" data-tab="edit">✂️ 編集</button>
-        <button class="top-tab" data-tab="settings">⚙️ 設定</button>
-        <button class="top-tab" data-tab="info">ℹ️ 情報</button>
+      <div class="brand-inline">
+        <span class="brand-dot">K</span>
+        <strong>KomaClip</strong>
       </div>
-      <div class="top-status">
+      <div class="top-actions">
         <div class="badge" id="badge"><span class="led"></span><span id="badgeText">待機中</span></div>
         <button class="pill-btn" id="pipBtn" disabled title="バックグラウンド時のズレ防止">📌 PiP</button>
         <button class="pill-btn" id="powerSaveBtn" title="省電力ブラックアウト">🔋 省電力</button>
+        <button class="pill-btn" id="themeBtn">☀️ ライトモード</button>
       </div>
     </header>
 
     <!-- TAB 1: RECORD -->
     <section class="tab-panel active" id="tab-record">
       <div class="record-grid">
-        <!-- Main Stage -->
+        <!-- Main Stage Card -->
         <div class="card stage-card">
+          <div class="stage-head">
+            <span class="stage-title" id="guideLabel">▶ ノート・手元ガイド (16:9)</span>
+            <button class="mini-pill" id="toggleGuideBtn">👁️ ガイド切替</button>
+          </div>
+
           <div class="stage-wrap" id="stageWrap">
             <video id="preview" autoplay muted playsinline></video>
-            <canvas id="pipCanvas" style="display:none;"></canvas>
-            <video id="pipVideo" autoplay muted playsinline style="display:none;"></video>
 
             <div class="stage-placeholder" id="placeholder">
               <div class="hero-icon">🎬</div>
               <h2>録画を開始しましょう！</h2>
               <p>カメラ接続で比率・構図を確認してから録画を開始できます</p>
               <div class="hero-btns">
-                <button class="btn btn-primary" id="heroCamBtn">📷 カメラ接続</button>
-                <button class="btn" id="demoBtn">✨ デモで編集を試す</button>
+                <button class="btn btn-primary btn-lg" id="heroCamBtn">📷 カメラ接続</button>
+                <button class="btn btn-lg" id="demoBtn">✨ デモで編集を試す</button>
               </div>
             </div>
 
             <div class="guide-layer" id="guideLayer"></div>
-            <div class="guide-label" id="guideLabel"></div>
             <div class="next-shot-bar" id="nextShotBar"></div>
             <div class="flash" id="flash"></div>
           </div>
         </div>
 
-        <!-- Right Side: Status & Quick Actions -->
+        <!-- Right Column: Status Card -->
         <div class="side-col">
-          <div class="card">
+          <div class="card status-card">
             <div class="card-title">📊 撮影ステータス</div>
             <div class="stats-grid">
-              <div class="stat-box">
+              <div class="stat-box tint-blue">
                 <div class="stat-label">撮影枚数</div>
                 <div class="stat-val" id="frameCount">0<span>枚</span></div>
               </div>
-              <div class="stat-box">
+              <div class="stat-box tint-purple">
                 <div class="stat-label">勉強時間</div>
                 <div class="stat-val" id="elapsed">00:00</div>
               </div>
-              <div class="stat-box">
+              <div class="stat-box tint-mint">
                 <div class="stat-label">仕上がり</div>
                 <div class="stat-val" id="estDuration">0.0<span>秒</span></div>
               </div>
-              <div class="stat-box">
+              <div class="stat-box tint-green">
                 <div class="stat-label">自動保存</div>
-                <div class="stat-val" id="dbStatus" style="font-size:13px; color:var(--ok);">準備完了</div>
+                <div class="stat-val ok-text" id="dbStatus">準備完了</div>
               </div>
             </div>
           </div>
 
-          <div class="card">
-            <div class="card-title">⚡ クイックアクション</div>
+          <div class="card quick-card">
+            <div class="card-title">⚡ クイック操作</div>
             <div class="action-list">
               <button class="action-row" id="goEditBtn">
-                <span>✂️ 編集に進む</span><span>›</span>
-              </button>
-              <button class="action-row" id="switchCamBtn" disabled>
-                <span>🔄 カメラ切替（前/後）</span><span>›</span>
+                <span>✂️ 編集タブへ進む</span><span>›</span>
               </button>
               <button class="action-row" id="clearDbBtn">
                 <span>🗑️ 保存済みデータを破棄</span><span>›</span>
@@ -117,9 +109,9 @@
         </div>
       </div>
 
-      <!-- Bottom 2-Row Settings Panel -->
-      <div class="card bottom-settings">
-        <div class="card-title">📷 録画設定（勉強タイムラプス規定値）</div>
+      <!-- Middle Card: Settings -->
+      <div class="card settings-card">
+        <div class="card-title">⚙️ 録画設定（勉強タイムラプス規定値）</div>
         <div class="settings-row">
           <div class="field">
             <label>録画比率</label>
@@ -167,33 +159,35 @@
             </select>
           </div>
         </div>
+      </div>
 
-        <div class="settings-row bottom-bar">
-          <div class="btns">
-            <button class="btn" id="connectCamBtn">📷 カメラ接続</button>
-            <button class="btn btn-warn" id="pauseBtn" disabled>⏸ 一時停止</button>
-            <button class="btn btn-danger" id="finishBtn" disabled>■ 終了して編集</button>
-          </div>
-          <button class="btn btn-primary btn-lg" id="startBtn" disabled>● 録画開始</button>
+      <!-- Bottom Floating Action Bar -->
+      <div class="card action-dock">
+        <div class="btns">
+          <button class="btn" id="connectCamBtn">📷 カメラ接続</button>
+          <button class="btn" id="switchCamBtn" disabled>🔄 切替</button>
+          <button class="btn btn-warn-soft" id="pauseBtn" disabled>⏸ 一時停止</button>
+          <button class="btn btn-danger-soft" id="finishBtn" disabled>■ 終了して編集</button>
         </div>
+        <button class="btn btn-primary btn-lg" id="startBtn" disabled>▶ 録画開始</button>
       </div>
     </section>
 
     <!-- TAB 2: EDIT -->
     <section class="tab-panel" id="tab-edit">
       <div class="edit-top">
-        <div class="card edit-preview-card">
+        <div class="card">
           <div class="edit-stage">
             <canvas id="editorCanvas"></canvas>
             <img id="cornerGif" alt="右下GIF">
           </div>
-          <div class="edit-playback-bar">
+          <div class="row-between">
             <button class="btn btn-primary" id="playPreviewBtn">▶ プレビュー再生</button>
             <span id="editorStats" class="muted-text">フレームがありません</span>
           </div>
         </div>
 
-        <div class="card edit-tools-card">
+        <div class="card">
           <div class="card-title">🎨 右下GIFスタンプ（MP4に合成）</div>
           <div class="btns">
             <label class="btn" for="gifFileInput">📁 GIFを選ぶ</label>
@@ -214,7 +208,7 @@
             <input type="range" id="stillThreshold" min="1" max="15" step="0.5" value="3.5">
           </div>
           <div class="btns">
-            <button class="btn btn-warn" id="excludeStillBtn">🧹 静止を一括除外</button>
+            <button class="btn btn-warn-soft" id="excludeStillBtn">🧹 静止を一括除外</button>
             <button class="btn" id="restoreAllBtn">↺ 全復元</button>
           </div>
 
@@ -228,14 +222,14 @@
             <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
           </div>
 
-          <button class="btn btn-ok btn-lg" id="exportMp4Btn" style="width:100%;">⬇ MP4動画を作成して保存</button>
+          <button class="btn btn-primary btn-lg" id="exportMp4Btn" style="width:100%;">⬇ MP4動画を作成して保存</button>
           <div class="download-links" id="downloadLinks"></div>
         </div>
       </div>
 
       <div class="card">
         <div class="row-between">
-          <div class="card-title" style="margin:0;">✂️ 一覧グリッド編集（左クリック長押しスライドで一気に除外／復元）</div>
+          <div class="card-title">✂️ 一覧グリッド編集（左クリック長押しスライドで一気に除外／復元）</div>
           <label class="muted-text" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
             <input type="checkbox" id="touchDragCheck"> スマホなぞり選択
           </label>
@@ -247,10 +241,10 @@
     <!-- TAB 3: SETTINGS -->
     <section class="tab-panel" id="tab-settings">
       <div class="card">
-        <div class="card-title">⚙️ アプリ設定・ストレージ管理</div>
-        <p class="muted-text">撮影したフレームは1枚ごとにブラウザ内の IndexedDB へ自動保存されます。誤ってリロードしても起動時に復元できます。</p>
-        <div class="btns" style="margin-top:10px;">
-          <button class="btn btn-danger" id="settingsClearDbBtn">🗑️ IndexedDB の保存データを完全に消去</button>
+        <div class="card-title">⚙️ ストレージ管理</div>
+        <p class="muted-text">撮影したフレームは1枚ごとにブラウザ内の IndexedDB へ自動保存されます。</p>
+        <div class="btns">
+          <button class="btn btn-danger-soft" id="settingsClearDbBtn">🗑️ IndexedDB の保存データを完全に消去</button>
         </div>
       </div>
     </section>
@@ -261,8 +255,8 @@
         <div class="card-title">ℹ️ KomaClip について</div>
         <ul class="info-list">
           <li><strong>100% ローカル処理：</strong>映像や画像はサーバーへ一切送信されません。</li>
-          <li><strong>バックグラウンド対策：</strong>Web Worker タイマー＋PiP（小窓表示）により、別タブ作業中でも撮影間隔がズレにくくなります。</li>
-          <li><strong>ショートカット（編集タブ）：</strong><code>←</code> <code>→</code> でコマ移動、<code>Space</code> で再生/停止、<code>Delete</code> で除外/復元。</li>
+          <li><strong>バックグラウンド対策：</strong>Web Worker タイマー＋PiPにより、別タブ作業中でもズレを防ぎます。</li>
+          <li><strong>ショートカット（編集）：</strong><code>←</code> <code>→</code> コマ移動、<code>Space</code> 再生/停止、<code>Delete</code> 除外/復元。</li>
         </ul>
       </div>
     </section>
