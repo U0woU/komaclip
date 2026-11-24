@@ -66,20 +66,25 @@ $('goEditBtn').onclick = () => switchTab('edit');
 const themeBtn = $('themeBtn');
 function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
-  themeBtn.textContent = t === 'light' ? '☀️ ライトモード' : '🌙 ダークモード';
+  if (themeBtn) themeBtn.textContent = t === 'light' ? '☀️ ライトモード' : '🌙 ダークモード';
   localStorage.setItem('komaclip_theme', t);
 }
 applyTheme(localStorage.getItem('komaclip_theme') || 'light');
-themeBtn.onclick = () => {
-  const cur = document.documentElement.getAttribute('data-theme');
-  applyTheme(cur === 'light' ? 'dark' : 'light');
-};
+if (themeBtn) {
+  themeBtn.onclick = () => {
+    const cur = document.documentElement.getAttribute('data-theme');
+    applyTheme(cur === 'light' ? 'dark' : 'light');
+  };
+}
 
-$('toggleGuideBtn').onclick = () => {
-  const sel = $('guideSelect');
-  sel.value = sel.value === 'off' ? 'study' : 'off';
-  renderGuide();
-};
+const toggleGuideBtn = $('toggleGuideBtn');
+if (toggleGuideBtn) {
+  toggleGuideBtn.onclick = () => {
+    const sel = $('guideSelect');
+    sel.value = sel.value === 'off' ? 'study' : 'off';
+    renderGuide();
+  };
+}
 
 // ===== Ratio & Dimensions =====
 function calcOutputSize() {
