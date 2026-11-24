@@ -43,9 +43,14 @@ let prevDiffData = null;
 const editorCanvas = $('editorCanvas');
 const editorCtx = editorCanvas.getContext('2d');
 
+// ===== Sidebar Toggle =====
+$('sidebarToggleBtn').onclick = () => {
+  $('appShell').classList.toggle('sidebar-collapsed');
+};
+
 // ===== Tab Navigation =====
 function switchTab(tabName) {
-  document.querySelectorAll('.nav-item, .top-tab').forEach(el => {
+  document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.tab === tabName);
   });
   document.querySelectorAll('.tab-panel').forEach(p => {
@@ -57,34 +62,21 @@ function switchTab(tabName) {
     stopPreview();
   }
 }
-document.querySelectorAll('.nav-item, .top-tab').forEach(el => {
+document.querySelectorAll('.nav-item').forEach(el => {
   el.onclick = () => switchTab(el.dataset.tab);
 });
-$('goEditBtn').onclick = () => switchTab('edit');
 
 // ===== Theme =====
 const themeBtn = $('themeBtn');
 function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
-  if (themeBtn) themeBtn.textContent = t === 'light' ? '☀️ ライトモード' : '🌙 ダークモード';
+  themeBtn.textContent = t === 'light' ? '☀️ ライト' : '🌙 ダーク';
   localStorage.setItem('komaclip_theme', t);
 }
 applyTheme(localStorage.getItem('komaclip_theme') || 'light');
-if (themeBtn) {
-  themeBtn.onclick = () => {
-    const cur = document.documentElement.getAttribute('data-theme');
-    applyTheme(cur === 'light' ? 'dark' : 'light');
-  };
-}
-
-const toggleGuideBtn = $('toggleGuideBtn');
-if (toggleGuideBtn) {
-  toggleGuideBtn.onclick = () => {
-    const sel = $('guideSelect');
-    sel.value = sel.value === 'off' ? 'study' : 'off';
-    renderGuide();
-  };
-}
+themeBtn.onclick = () => {
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+};
 
 // ===== Ratio & Dimensions =====
 function calcOutputSize() {
@@ -99,14 +91,14 @@ function calcOutputSize() {
     W = Math.round(base * (rw / rh)) & ~1;
   }
   capCanvas.width = W; capCanvas.height = H;
-  thumbCanvas.width = 140;
-  thumbCanvas.height = Math.max(40, Math.round(140 * (H / W)));
+  thumbCanvas.width = 160;
+  thumbCanvas.height = Math.max(40, Math.round(160 * (H / W)));
 }
 
 $('ratioGroup').addEventListener('click', (e) => {
   const btn = e.target.closest('.ratio-btn');
   if (!btn || isRecording) return;
-  document.querySelectorAll('.ratio-btn').forEach(b => b.classList.remove('active'));
+  $('ratioGroup').querySelectorAll('.ratio-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   selectedRatio = btn.dataset.ratio;
   calcOutputSize();
@@ -118,32 +110,40 @@ function renderGuide() {
   const mode = $('guideSelect').value;
   const layer = $('guideLayer');
   const label = $('guideLabel');
-  if (mode === 'off') { layer.innerHTML = ''; label.style.display = 'none'; return; }
-  label.style.display = 'block';
+  if (mode === 'off') {
+    layer.innerHTML = '';
+    label.textContent = `▶ ガイドなし (${selectedRatio})`;
+    return;
+  }
   if (mode === 'study') {
-    label.textContent = `ノート・手元ガイド (${selectedRatio})`;
+    label.textContent = `▶ ノート・手元ガイド (${selectedRatio})`;
     layer.innerHTML = `<svg viewBox="0 0 1600 900" preserveAspectRatio="none">
-      <rect x="260" y="160" width="1080" height="580" rx="18" fill="none" stroke="rgba(56,189,248,0.65)" stroke-width="3" stroke-dasharray="14 10"/>
+      <rect x="260" y="160" width="1080" height="580" rx="18" fill="none" stroke="rgba(56,189,248,0.75)" stroke-width="3" stroke-dasharray="14 10"/>
       <line x1="775" y1="450" x2="825" y2="450" stroke="#38bdf8" stroke-width="2.5"/>
       <line x1="800" y1="425" x2="800" y2="475" stroke="#38bdf8" stroke-width="2.5"/>
     </svg>`;
   } else if (mode === 'thirds') {
-    label.textContent = '三分割グリッド';
+    label.textContent = `▶ 三分割グリッド (${selectedRatio})`;
     layer.innerHTML = `<svg viewBox="0 0 1600 900" preserveAspectRatio="none">
-      <line x1="533" y1="0" x2="533" y2="900" stroke="rgba(255,255,255,0.35)" stroke-width="2"/>
-      <line x1="1066" y1="0" x2="1066" y2="900" stroke="rgba(255,255,255,0.35)" stroke-width="2"/>
-      <line x1="0" y1="300" x2="1600" y2="300" stroke="rgba(255,255,255,0.35)" stroke-width="2"/>
-      <line x1="0" y1="600" x2="1600" y2="600" stroke="rgba(255,255,255,0.35)" stroke-width="2"/>
+      <line x1="533" y1="0" x2="533" y2="900" stroke="rgba(255,255,255,0.45)" stroke-width="2"/>
+      <line x1="1066" y1="0" x2="1066" y2="900" stroke="rgba(255,255,255,0.45)" stroke-width="2"/>
+      <line x1="0" y1="300" x2="1600" y2="300" stroke="rgba(255,255,255,0.45)" stroke-width="2"/>
+      <line x1="0" y1="600" x2="1600" y2="600" stroke="rgba(255,255,255,0.45)" stroke-width="2"/>
     </svg>`;
   } else {
-    label.textContent = '水平・中心線';
+    label.textContent = `▶ 水平・中心線 (${selectedRatio})`;
     layer.innerHTML = `<svg viewBox="0 0 1600 900" preserveAspectRatio="none">
-      <line x1="0" y1="450" x2="1600" y2="450" stroke="rgba(56,189,248,0.65)" stroke-width="2.5"/>
-      <line x1="800" y1="0" x2="800" y2="900" stroke="rgba(255,255,255,0.3)" stroke-width="2" stroke-dasharray="10 10"/>
+      <line x1="0" y1="450" x2="1600" y2="450" stroke="rgba(56,189,248,0.75)" stroke-width="2.5"/>
+      <line x1="800" y1="0" x2="800" y2="900" stroke="rgba(255,255,255,0.4)" stroke-width="2" stroke-dasharray="10 10"/>
     </svg>`;
   }
 }
 $('guideSelect').onchange = renderGuide;
+$('toggleGuideBtn').onclick = () => {
+  const sel = $('guideSelect');
+  sel.value = sel.value === 'off' ? 'study' : 'off';
+  renderGuide();
+};
 calcOutputSize();
 renderGuide();
 
@@ -168,7 +168,7 @@ function updateStats() {
 }
 $('fpsSelect').onchange = () => { updateStats(); updateEditorStats(); };
 
-// ===== Camera Connect (Separated from Recording) =====
+// ===== Camera Connect =====
 async function connectCamera() {
   if (stream) {
     stream.getTracks().forEach(t => t.stop());
@@ -203,25 +203,20 @@ $('switchCamBtn').onclick = () => {
   connectCamera();
 };
 
-// ===== PiP (Background Timer Stability) =====
+// ===== PiP & Power Save =====
 $('pipBtn').onclick = async () => {
   try {
-    if (document.pictureInPictureElement) {
-      await document.exitPictureInPicture();
-    } else if ($('preview').srcObject) {
-      await $('preview').requestPictureInPicture();
-    }
+    if (document.pictureInPictureElement) await document.exitPictureInPicture();
+    else if ($('preview').srcObject) await $('preview').requestPictureInPicture();
   } catch (e) {
     $('hint').textContent = 'PiP未対応または許可されていません: ' + e.message;
   }
 };
-
-// Power Save Overlay
 $('powerSaveBtn').onclick = () => $('powerSaveOverlay').classList.add('active');
 $('psExitBtn').onclick = () => $('powerSaveOverlay').classList.remove('active');
 $('powerSaveOverlay').ondblclick = () => $('powerSaveOverlay').classList.remove('active');
 
-// ===== Web Worker Accurate Timer =====
+// ===== Web Worker Timer =====
 function startWorkerTimer() {
   stopWorkerTimer();
   const code = `setInterval(() => postMessage('tick'), 200);`;
@@ -247,20 +242,15 @@ function stopWorkerTimer() {
   if (worker) { worker.terminate(); worker = null; }
 }
 
-// ===== Center Crop Capture + IndexedDB Save =====
+// ===== Capture + IndexedDB =====
 function drawCroppedTo(ctx, dstW, dstH) {
   const v = $('preview');
   const vw = v.videoWidth, vh = v.videoHeight;
   const srcRatio = vw / vh;
   const dstRatio = dstW / dstH;
   let sx = 0, sy = 0, sw = vw, sh = vh;
-  if (srcRatio > dstRatio) {
-    sw = vh * dstRatio;
-    sx = (vw - sw) / 2;
-  } else {
-    sh = vw / dstRatio;
-    sy = (vh - sh) / 2;
-  }
+  if (srcRatio > dstRatio) { sw = vh * dstRatio; sx = (vw - sw) / 2; }
+  else { sh = vw / dstRatio; sy = (vh - sh) / 2; }
   ctx.drawImage(v, sx, sy, sw, sh, 0, 0, dstW, dstH);
 }
 
@@ -357,19 +347,19 @@ $('finishBtn').onclick = () => {
   switchTab('edit');
 };
 
-// ===== Demo Data Generator =====
+// ===== Demo Data =====
 $('demoBtn').onclick = async () => {
   calcOutputSize();
   await storage.clearAll();
   frames = [];
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const ctx = c.getContext('2d');
-  for (let i = 0; i < 20; i++) {
-    const isStill = i >= 8 && i <= 12;
+  for (let i = 0; i < 24; i++) {
+    const isStill = i >= 10 && i <= 14;
     ctx.fillStyle = '#181c2b'; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = isStill ? '#332818' : '#252b42';
-    ctx.fillRect(W * 0.15, H * 0.15, W * 0.7, H * 0.7);
-    ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.round(W * 0.05)}px sans-serif`;
+    ctx.fillStyle = isStill ? '#3d2c14' : '#253152';
+    ctx.fillRect(W * 0.14, H * 0.14, W * 0.72, H * 0.72);
+    ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.round(W * 0.055)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillText(isStill ? `離席中 #${i + 1}` : `勉強中 #${i + 1}`, W / 2, H / 2);
     const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
@@ -377,12 +367,12 @@ $('demoBtn').onclick = async () => {
     const id = await storage.addFrame({ blob, thumbBlob: blob, motion, excluded: false });
     frames.push({ id, blob, thumbUrl: URL.createObjectURL(blob), motion, excluded: false });
   }
-  await storage.saveMeta({ W, H, selectedRatio, elapsedMs: 200000 });
+  await storage.saveMeta({ W, H, selectedRatio, elapsedMs: 240000 });
   updateStats();
   switchTab('edit');
 };
 
-// ===== Editor & Grid =====
+// ===== Editor (2-Pane & Quick Trim) =====
 function getActiveIndices() {
   return frames.map((f, i) => f.excluded ? -1 : i).filter(i => i >= 0);
 }
@@ -401,18 +391,28 @@ function renderEditor() {
   });
   grid.appendChild(frag);
   updateStillHighlight();
-  showFrame(0);
+  showFrame(Math.min(currentIdx, frames.length - 1));
   updateEditorStats();
 }
 
 function applyExclude(idx, state) {
   if (!frames[idx] || frames[idx].excluded === state) return;
   frames[idx].excluded = state;
-  const el = $('gridWrap').children[idx];
-  if (el) el.classList.toggle('excluded', state);
+  $('gridWrap').children[idx]?.classList.toggle('excluded', state);
   if (frames[idx].id != null) storage.setExcluded(frames[idx].id, state);
   updateEditorStats();
 }
+
+// Grid Thumbnail Size Switch
+$('gridSizeGroup').addEventListener('click', (e) => {
+  const btn = e.target.closest('.ratio-btn');
+  if (!btn) return;
+  $('gridSizeGroup').querySelectorAll('.ratio-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const grid = $('gridWrap');
+  grid.classList.remove('size-sm', 'size-md', 'size-lg');
+  grid.classList.add('size-' + btn.dataset.size);
+});
 
 $('touchDragCheck').onchange = () => $('gridWrap').classList.toggle('drag-touch', $('touchDragCheck').checked);
 
@@ -438,6 +438,14 @@ window.addEventListener('pointermove', (e) => {
 });
 window.addEventListener('pointerup', () => { isDragging = false; });
 
+// 冒頭・末尾 1クリックカット
+$('cutBeforeBtn').onclick = () => {
+  for (let i = 0; i < currentIdx; i++) applyExclude(i, true);
+};
+$('cutAfterBtn').onclick = () => {
+  for (let i = currentIdx + 1; i < frames.length; i++) applyExclude(i, true);
+};
+
 function updateStillHighlight() {
   const th = Number($('stillThreshold').value);
   let cnt = 0;
@@ -460,6 +468,7 @@ async function showFrame(idx) {
   $('gridWrap').children[currentIdx]?.classList.remove('current');
   currentIdx = idx;
   $('gridWrap').children[currentIdx]?.classList.add('current');
+  $('currentFrameInfo').textContent = `#${idx + 1} / ${frames.length}`;
   const bmp = await createImageBitmap(frames[idx].blob);
   editorCtx.drawImage(bmp, 0, 0, W, H);
   bmp.close();
@@ -474,7 +483,7 @@ function updateEditorStats() {
 function stopPreview() {
   isPlaying = false;
   cancelAnimationFrame(playRaf);
-  $('playPreviewBtn').textContent = '▶ プレビュー再生';
+  $('playPreviewBtn').textContent = '▶ 再生';
 }
 $('playPreviewBtn').onclick = () => {
   if (isPlaying) { stopPreview(); return; }
@@ -494,6 +503,17 @@ $('playPreviewBtn').onclick = () => {
     playRaf = requestAnimationFrame(loop);
   };
   playRaf = requestAnimationFrame(loop);
+};
+
+// ===== Export Modal =====
+$('openExportModalBtn').onclick = () => {
+  if (frames.length < 2) { alert('書き出すフレームがありません'); return; }
+  stopPreview();
+  $('exportModal').classList.add('open');
+};
+$('closeExportModalBtn').onclick = () => $('exportModal').classList.remove('open');
+$('exportModal').onclick = (e) => {
+  if (e.target === $('exportModal')) $('exportModal').classList.remove('open');
 };
 
 // ===== Corner GIF Overlay =====
@@ -532,7 +552,7 @@ $('removeGifBtn').onclick = () => {
   $('gifFileInput').value = '';
   overlayGifFrames.forEach(f => f.bitmap.close());
   overlayGifFrames = []; overlayStaticImg = null;
-  $('gifStatusText').textContent = '未設定（Canva等のGIFを右下に配置）';
+  $('gifStatusText').textContent = '未設定（Canva等のGIFを右下に配置できます）';
 };
 
 function drawCornerOverlay(ctx, cw, ch, timeMs) {
@@ -549,7 +569,7 @@ function drawCornerOverlay(ctx, cw, ch, timeMs) {
   ctx.drawImage(img, cw - dw - pad, ch - dh - pad, dw, dh);
 }
 
-// ===== Fast MP4 Export (firstTimestampBehavior: 'offset' 修正済み) =====
+// ===== Fast MP4 Export =====
 function setProgress(active, label = '', pct = 0) {
   $('progressWrap').classList.toggle('active', active);
   $('progressLabel').textContent = label;
@@ -559,7 +579,7 @@ function setProgress(active, label = '', pct = 0) {
 
 function addDownload(blob, ext) {
   if (!blob || blob.size === 0) {
-    alert('動画データの生成に失敗しました（0バイト）。別ブラウザまたは解像度を変更して試してください。');
+    alert('動画データの生成に失敗しました（0バイト）。');
     return;
   }
   const url = URL.createObjectURL(blob);
@@ -575,7 +595,6 @@ function addDownload(blob, ext) {
 $('exportMp4Btn').onclick = async () => {
   const active = getActiveIndices();
   if (active.length < 2) { alert('有効なフレームが2枚以上必要です'); return; }
-  stopPreview();
   $('exportMp4Btn').disabled = true;
 
   const fps = Number($('fpsSelect').value);
@@ -642,7 +661,6 @@ $('exportMp4Btn').onclick = async () => {
 };
 
 async function exportFallback(active, fps, comp, cctx) {
-  // DOMへ一時追加して0バイトバグを防止
   comp.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;pointer-events:none;';
   document.body.appendChild(comp);
   try {
@@ -673,27 +691,24 @@ async function exportFallback(active, fps, comp, cctx) {
   }
 }
 
-// ===== Clear DB & Startup Restore =====
-async function clearSavedData() {
+// ===== Clear DB & Shortcuts & Startup Restore =====
+$('settingsClearDbBtn').onclick = async () => {
   if (!confirm('保存されている撮影データをすべて消去しますか？')) return;
   await storage.clearAll();
   frames = [];
   updateStats();
   $('dbStatus').textContent = '消去済み';
   $('gridWrap').innerHTML = '';
-}
-$('clearDbBtn').onclick = clearSavedData;
-$('settingsClearDbBtn').onclick = clearSavedData;
+};
 
 window.addEventListener('keydown', (e) => {
-  if (!$('tab-edit').classList.contains('active')) return;
+  if (!$('tab-edit').classList.contains('active') || $('exportModal').classList.contains('open')) return;
   if (e.key === 'ArrowLeft') { e.preventDefault(); stopPreview(); showFrame(Math.max(0, currentIdx - 1)); }
   else if (e.key === 'ArrowRight') { e.preventDefault(); stopPreview(); showFrame(Math.min(frames.length - 1, currentIdx + 1)); }
   else if (e.code === 'Space') { e.preventDefault(); $('playPreviewBtn').click(); }
   else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); applyExclude(currentIdx, !frames[currentIdx].excluded); }
 });
 
-// 起動時に未保存データを自動チェック
 (async () => {
   try {
     const restored = await storage.restoreAll();
@@ -716,3 +731,9 @@ window.addEventListener('keydown', (e) => {
     console.warn('IndexedDB初期化スキップ:', e);
   }
 })();
+
+window.addEventListener('beforeunload', () => {
+  stopWorkerTimer();
+  if (wakeLock) wakeLock.release().catch(() => {});
+  if (stream) stream.getTracks().forEach(t => t.stop());
+});
