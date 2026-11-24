@@ -4,25 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>KomaClip — 勉強タイムラプス</title>
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=3">
 </head>
 <body>
-<div class="shell">
-  <!-- Left Slim Icon Sidebar -->
-  <aside class="sidebar">
+<div class="shell" id="appShell">
+  <!-- Left Collapsible Icon Sidebar -->
+  <aside class="sidebar" id="sidebar">
     <nav class="side-nav">
-      <button class="nav-item active" data-tab="record" title="録画">
-        <span class="ico">🎬</span>
-      </button>
-      <button class="nav-item" data-tab="edit" title="編集">
-        <span class="ico">✂️</span>
-      </button>
-      <button class="nav-item" data-tab="settings" title="設定">
-        <span class="ico">⚙️</span>
-      </button>
-      <button class="nav-item" data-tab="info" title="情報">
-        <span class="ico">ℹ️</span>
-      </button>
+      <button class="nav-item active" data-tab="record" title="録画">🎬</button>
+      <button class="nav-item" data-tab="edit" title="編集">✂️</button>
+      <button class="nav-item" data-tab="settings" title="設定">⚙️</button>
+      <button class="nav-item" data-tab="info" title="情報">ℹ️</button>
     </nav>
   </aside>
 
@@ -30,19 +22,22 @@
   <div class="main">
     <!-- Minimal Topbar -->
     <header class="topbar">
-      <div class="brand-inline">
-        <span class="brand-dot">K</span>
-        <strong>KomaClip</strong>
+      <div class="top-left">
+        <button class="pill-btn icon-only" id="sidebarToggleBtn" title="サイドバー開閉">☰</button>
+        <div class="brand-inline">
+          <span class="brand-dot">K</span>
+          <strong>KomaClip</strong>
+        </div>
       </div>
       <div class="top-actions">
         <div class="badge" id="badge"><span class="led"></span><span id="badgeText">待機中</span></div>
         <button class="pill-btn" id="pipBtn" disabled title="バックグラウンド時のズレ防止">📌 PiP</button>
         <button class="pill-btn" id="powerSaveBtn" title="省電力ブラックアウト">🔋 省電力</button>
-        <button class="pill-btn" id="themeBtn">☀️ ライトモード</button>
+        <button class="pill-btn" id="themeBtn">☀️ ライト</button>
       </div>
     </header>
 
-    <!-- TAB 1: RECORD -->
+    <!-- TAB 1: RECORD (クイック操作削除・ステージ拡大) -->
     <section class="tab-panel active" id="tab-record">
       <div class="record-grid">
         <!-- Main Stage Card -->
@@ -71,45 +66,31 @@
           </div>
         </div>
 
-        <!-- Right Column: Status Card -->
-        <div class="side-col">
-          <div class="card status-card">
-            <div class="card-title">📊 撮影ステータス</div>
-            <div class="stats-grid">
-              <div class="stat-box tint-blue">
-                <div class="stat-label">撮影枚数</div>
-                <div class="stat-val" id="frameCount">0<span>枚</span></div>
-              </div>
-              <div class="stat-box tint-purple">
-                <div class="stat-label">勉強時間</div>
-                <div class="stat-val" id="elapsed">00:00</div>
-              </div>
-              <div class="stat-box tint-mint">
-                <div class="stat-label">仕上がり</div>
-                <div class="stat-val" id="estDuration">0.0<span>秒</span></div>
-              </div>
-              <div class="stat-box tint-green">
-                <div class="stat-label">自動保存</div>
-                <div class="stat-val ok-text" id="dbStatus">準備完了</div>
-              </div>
+        <!-- Right Column: Status Only -->
+        <div class="card status-card">
+          <div class="card-title">📊 撮影ステータス</div>
+          <div class="stats-grid">
+            <div class="stat-box tint-blue">
+              <div class="stat-label">撮影枚数</div>
+              <div class="stat-val" id="frameCount">0<span>枚</span></div>
             </div>
-          </div>
-
-          <div class="card quick-card">
-            <div class="card-title">⚡ クイック操作</div>
-            <div class="action-list">
-              <button class="action-row" id="goEditBtn">
-                <span>✂️ 編集タブへ進む</span><span>›</span>
-              </button>
-              <button class="action-row" id="clearDbBtn">
-                <span>🗑️ 保存済みデータを破棄</span><span>›</span>
-              </button>
+            <div class="stat-box tint-purple">
+              <div class="stat-label">勉強時間</div>
+              <div class="stat-val" id="elapsed">00:00</div>
+            </div>
+            <div class="stat-box tint-mint">
+              <div class="stat-label">仕上がり</div>
+              <div class="stat-val" id="estDuration">0.0<span>秒</span></div>
+            </div>
+            <div class="stat-box tint-green">
+              <div class="stat-label">自動保存</div>
+              <div class="stat-val ok-text" id="dbStatus">準備完了</div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Middle Card: Settings -->
+      <!-- Settings Card -->
       <div class="card settings-card">
         <div class="card-title">⚙️ 録画設定（勉強タイムラプス規定値）</div>
         <div class="settings-row">
@@ -161,7 +142,7 @@
         </div>
       </div>
 
-      <!-- Bottom Floating Action Bar -->
+      <!-- Bottom Floating Action Dock -->
       <div class="card action-dock">
         <div class="btns">
           <button class="btn" id="connectCamBtn">📷 カメラ接続</button>
@@ -173,68 +154,69 @@
       </div>
     </section>
 
-    <!-- TAB 2: EDIT -->
+    <!-- TAB 2: EDIT (横2ペイン化・カット作業集中) -->
     <section class="tab-panel" id="tab-edit">
-      <div class="edit-top">
-        <div class="card">
+      <div class="edit-header-bar">
+        <div class="edit-header-left">
+          <strong>✂️ タイムラプス編集</strong>
+          <span id="editorStats" class="muted-text">フレームがありません</span>
+        </div>
+        <button class="btn btn-primary" id="openExportModalBtn">🎥 書き出しへ進む（GIF・MP4）</button>
+      </div>
+
+      <div class="edit-2pane">
+        <!-- Left Pane: Preview & Quick Cut Controls -->
+        <div class="card edit-left-pane">
           <div class="edit-stage">
             <canvas id="editorCanvas"></canvas>
             <img id="cornerGif" alt="右下GIF">
           </div>
+
           <div class="row-between">
-            <button class="btn btn-primary" id="playPreviewBtn">▶ プレビュー再生</button>
-            <span id="editorStats" class="muted-text">フレームがありません</span>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">🎨 右下GIFスタンプ（MP4に合成）</div>
-          <div class="btns">
-            <label class="btn" for="gifFileInput">📁 GIFを選ぶ</label>
-            <input type="file" id="gifFileInput" accept="image/gif,image/png,image/webp" hidden>
-            <button class="btn" id="removeGifBtn" style="display:none;">✕ 外す</button>
-          </div>
-          <div id="gifStatusText" class="muted-text">未設定（Canva等のGIFを右下に配置）</div>
-          <div class="field">
-            <label>GIFサイズ</label>
-            <input type="range" id="gifSizeRange" min="40" max="200" value="100">
+            <button class="btn btn-primary" id="playPreviewBtn">▶ 再生</button>
+            <span id="currentFrameInfo" class="muted-text">#0 / 0</span>
           </div>
 
-          <hr class="divider">
-
-          <div class="card-title">🟠 離席・静止の一括カット</div>
-          <div class="field">
-            <label>検出感度（<span id="stillCountLabel">0枚</span>）</label>
-            <input type="range" id="stillThreshold" min="1" max="15" step="0.5" value="3.5">
-          </div>
-          <div class="btns">
-            <button class="btn btn-warn-soft" id="excludeStillBtn">🧹 静止を一括除外</button>
-            <button class="btn" id="restoreAllBtn">↺ 全復元</button>
-          </div>
-
-          <hr class="divider">
-
-          <div class="progress-wrap" id="progressWrap">
-            <div class="progress-text">
-              <span id="progressLabel">MP4生成中...</span>
-              <span id="progressPct">0%</span>
+          <div class="cut-group">
+            <div class="field-label">範囲一括カット（現在位置基準）</div>
+            <div class="btns">
+              <button class="btn btn-danger-soft" id="cutBeforeBtn" style="flex:1;">⏮ ここから前を全除外</button>
+              <button class="btn btn-danger-soft" id="cutAfterBtn" style="flex:1;">ここから後ろを全除外 ⏭</button>
             </div>
-            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
           </div>
 
-          <button class="btn btn-primary btn-lg" id="exportMp4Btn" style="width:100%;">⬇ MP4動画を作成して保存</button>
-          <div class="download-links" id="downloadLinks"></div>
-        </div>
-      </div>
+          <hr class="divider">
 
-      <div class="card">
-        <div class="row-between">
-          <div class="card-title">✂️ 一覧グリッド編集（左クリック長押しスライドで一気に除外／復元）</div>
-          <label class="muted-text" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-            <input type="checkbox" id="touchDragCheck"> スマホなぞり選択
-          </label>
+          <div class="cut-group">
+            <div class="row-between">
+              <span class="field-label">🟠 離席・静止の自動検出</span>
+              <span id="stillCountLabel" class="muted-text">0枚</span>
+            </div>
+            <input type="range" id="stillThreshold" min="1" max="15" step="0.5" value="3.5">
+            <div class="btns">
+              <button class="btn btn-warn-soft" id="excludeStillBtn" style="flex:1;">🧹 静止を一括除外</button>
+              <button class="btn" id="restoreAllBtn">↺ 全復元</button>
+            </div>
+          </div>
         </div>
-        <div class="grid-wrap" id="gridWrap"></div>
+
+        <!-- Right Pane: Wide Grid -->
+        <div class="card edit-right-pane">
+          <div class="row-between">
+            <span class="muted-text">左クリック長押しスライドで一気に除外／復元（←→キー移動）</span>
+            <div class="grid-controls">
+              <div class="ratio-group" id="gridSizeGroup" style="width:120px;">
+                <button class="ratio-btn" data-size="sm">小</button>
+                <button class="ratio-btn active" data-size="md">中</button>
+                <button class="ratio-btn" data-size="lg">大</button>
+              </div>
+              <label class="muted-text" style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                <input type="checkbox" id="touchDragCheck"> なぞり
+              </label>
+            </div>
+          </div>
+          <div class="grid-wrap size-md" id="gridWrap"></div>
+        </div>
       </div>
     </section>
 
@@ -265,6 +247,43 @@
   </div>
 </div>
 
+<!-- Export Modal (GIF設定 & MP4書き出しを分離) -->
+<div class="modal-backdrop" id="exportModal">
+  <div class="modal-card">
+    <div class="row-between">
+      <strong style="font-size:15px;">🎥 動画の書き出し設定</strong>
+      <button class="mini-pill" id="closeExportModalBtn">✕ 閉じる</button>
+    </div>
+
+    <div class="cut-group">
+      <div class="field-label">🎨 右下GIFスタンプ（MP4に合成）</div>
+      <div class="btns">
+        <label class="btn" for="gifFileInput">📁 GIFを選ぶ</label>
+        <input type="file" id="gifFileInput" accept="image/gif,image/png,image/webp" hidden>
+        <button class="btn" id="removeGifBtn" style="display:none;">✕ 外す</button>
+      </div>
+      <div id="gifStatusText" class="muted-text">未設定（Canva等のGIFを右下に配置できます）</div>
+      <div class="field">
+        <label>GIFサイズ</label>
+        <input type="range" id="gifSizeRange" min="40" max="200" value="100">
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-text">
+        <span id="progressLabel">MP4生成中...</span>
+        <span id="progressPct">0%</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    </div>
+
+    <button class="btn btn-primary btn-lg" id="exportMp4Btn" style="width:100%;">⬇ MP4動画を作成して保存</button>
+    <div class="download-links" id="downloadLinks"></div>
+  </div>
+</div>
+
 <!-- Power-Save Overlay -->
 <div id="powerSaveOverlay">
   <div class="ps-dot"></div>
@@ -273,6 +292,6 @@
   <div class="ps-hint" id="psExitBtn">ダブルタップまたはクリックで復帰</div>
 </div>
 
-<script type="module" src="./app.js"></script>
+<script type="module" src="./app.js?v=3"></script>
 </body>
 </html>
