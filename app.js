@@ -93,8 +93,10 @@ function calcOutputSize() {
   capCanvas.width = W; capCanvas.height = H;
   thumbCanvas.width = 160;
   thumbCanvas.height = Math.max(40, Math.round(160 * (H / W)));
-}
 
+  // ▼ この1行を追加（プレビュー枠とグリッドの比率を連動）
+  document.documentElement.style.setProperty('--stage-ratio', `${rw} / ${rh}`);
+}
 $('ratioGroup').addEventListener('click', (e) => {
   const btn = e.target.closest('.ratio-btn');
   if (!btn || isRecording) return;
