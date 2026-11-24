@@ -63,14 +63,22 @@ document.querySelectorAll('.nav-item, .top-tab').forEach(el => {
 $('goEditBtn').onclick = () => switchTab('edit');
 
 // ===== Theme =====
-const themeToggle = $('themeToggle');
-const savedTheme = localStorage.getItem('komaclip_theme') || 'dark';
-document.documentElement.setAttribute('data-theme', savedTheme);
-themeToggle.checked = savedTheme === 'dark';
-themeToggle.onchange = () => {
-  const t = themeToggle.checked ? 'dark' : 'light';
+const themeBtn = $('themeBtn');
+function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
+  themeBtn.textContent = t === 'light' ? '☀️ ライトモード' : '🌙 ダークモード';
   localStorage.setItem('komaclip_theme', t);
+}
+applyTheme(localStorage.getItem('komaclip_theme') || 'light');
+themeBtn.onclick = () => {
+  const cur = document.documentElement.getAttribute('data-theme');
+  applyTheme(cur === 'light' ? 'dark' : 'light');
+};
+
+$('toggleGuideBtn').onclick = () => {
+  const sel = $('guideSelect');
+  sel.value = sel.value === 'off' ? 'study' : 'off';
+  renderGuide();
 };
 
 // ===== Ratio & Dimensions =====
