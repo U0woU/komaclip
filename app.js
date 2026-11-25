@@ -75,11 +75,20 @@ function setRatio(ratio) {
   renderGuide();
 }
 
-$('ratioGroup').addEventListener('click', (e) => {
+$('ratioGroup').addEventListener('click', async (e) => {
   const btn = e.target.closest('.ratio-btn');
-  if (btn && !isRecording) setRatio(btn.dataset.ratio);
+  if (!btn || isRecording) return;
+  setRatio(btn.dataset.ratio);
+
+  // PiP表示中なら一度閉じて新しい比率（9:16等）の枠で開き直す
+  if (document.pictureInPictureElement === pipVideo) {
+    try {
+      await document.exitPictureInPicture();
+      await refreshPipStream();
+      await pipVideo.requestPictureInPicture();
+    } catch {}
+  }
 });
-$('resSelect').onchange = () => { if (!isRecording) calcOutputSize(); };
 
 // ===== Guides =====
 const GUIDE_SVGS = {
