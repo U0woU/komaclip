@@ -2,7 +2,7 @@
   --bg-grad: linear-gradient(135deg, #eef2ff 0%, #f5f7ff 50%, #edf6ff 100%);
   --card: rgba(255, 255, 255, 0.92);
   --card-2: #f4f6fc;
-  --border: rgba(99, 115, 165, 0.14);
+  --border: rgba(99, 115, 165, 0.16);
   --shadow: 0 10px 30px -10px rgba(79, 110, 247, 0.12);
   --text: #1e2438;
   --muted: #6c7592;
@@ -84,16 +84,17 @@ body {
 }
 .card-title { font-size: 13px; font-weight: 700; }
 
-/* Record Stage (比率連動 + 高さはみ出し防止) */
+/* Record Stage */
 .record-grid { display: grid; grid-template-columns: 1fr 270px; gap: 14px; align-items: start; }
 .stage-head { display: flex; align-items: center; justify-content: space-between; }
 .stage-title { font-size: 12px; font-weight: 700; color: var(--accent); }
 
 .stage-wrap {
   position: relative;
-  width: min(100%, calc(55vh * var(--stage-ar)));
+  width: min(100%, calc(58vh * var(--stage-ar)));
   aspect-ratio: var(--stage-ar);
   margin: 0 auto;
+  justify-self: center;
   border-radius: 16px;
   overflow: hidden;
   border: 1.5px dashed rgba(99, 115, 165, 0.28);
@@ -135,17 +136,22 @@ body {
 .stat-val { font-size: 18px; font-weight: 800; margin-top: 3px; font-variant-numeric: tabular-nums; }
 .stat-val span { font-size: 11px; font-weight: 600; color: var(--muted); margin-left: 2px; }
 .ok-text { font-size: 13px; color: var(--ok); }
+.mini-flow-note {
+  font-size: 11px; line-height: 1.55; color: var(--muted);
+  background: var(--card-2); padding: 10px 12px; border-radius: 12px;
+}
 
 .settings-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: end; }
 .field { display: grid; gap: 6px; }
 .field label, .field-label { font-size: 11px; color: var(--muted); font-weight: 700; }
-select {
+select, .text-input {
   height: 38px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--border);
-  background: var(--card-2); color: var(--text); font-family: inherit; font-size: 12px; font-weight: 600;
+  background: var(--card-2); color: var(--text); font-family: inherit; font-size: 12px; font-weight: 600; width: 100%;
 }
+input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
 
 .ratio-group { display: flex; gap: 4px; padding: 3px; border-radius: 12px; background: var(--card-2); border: 1px solid var(--border); }
-.ratio-btn { flex: 1; height: 30px; border-radius: 9px; border: none; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; }
+.ratio-btn { flex: 1; height: 30px; border-radius: 9px; border: none; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; padding: 0 6px; white-space: nowrap; }
 .ratio-btn.active { background: var(--btn-grad); color: #fff; }
 
 /* Action Dock & Buttons */
@@ -166,34 +172,53 @@ select {
 /* Edit Tab */
 .edit-header-bar, .edit-header-left, .row-between, .grid-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .edit-header-bar, .row-between { justify-content: space-between; }
-.edit-2pane { display: grid; grid-template-columns: 360px 1fr; gap: 14px; align-items: start; }
+.edit-2pane { display: grid; grid-template-columns: 390px 1fr; gap: 14px; align-items: start; }
 .edit-left-pane { position: sticky; top: 14px; }
 
 .edit-stage {
   position: relative;
-  width: min(100%, calc(42vh * var(--stage-ar)));
+  width: min(100%, calc(40vh * var(--stage-ar)));
   aspect-ratio: var(--stage-ar);
   margin: 0 auto;
   background: #0d1018; border-radius: 12px; overflow: hidden; display: grid; place-items: center;
 }
 #editorCanvas { width: 100%; height: 100%; object-fit: contain; display: block; }
-#cornerGif { position: absolute; right: 12px; bottom: 12px; width: 90px; display: none; pointer-events: none; border-radius: 8px; }
+.edit-empty {
+  position: absolute; inset: 0; display: grid; place-content: center; gap: 6px;
+  text-align: center; padding: 16px; background: var(--card-2); font-size: 14px; font-weight: 700;
+}
+.edit-empty.hidden { display: none; }
+
+/* Edit Sub-tabs */
+.subtab-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px; border-radius: 12px; background: var(--card-2); border: 1px solid var(--border); }
+.subtab-btn {
+  height: 32px; border: none; border-radius: 9px; background: transparent;
+  color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; font-family: inherit; transition: 0.15s;
+}
+.subtab-btn.active { background: var(--card); color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.tool-panel { display: none; gap: 10px; }
+.tool-panel.active { display: grid; }
+.slider-row { display: grid; gap: 4px; }
+.check-row { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; cursor: pointer; }
 
 .cut-group { display: grid; gap: 8px; }
 .divider { border: none; border-top: 1px solid var(--border); }
 .muted-text { font-size: 12px; color: var(--muted); }
 
-.stage-wrap {
-  position: relative;
-  width: min(100%, calc(60vh * var(--stage-ar)));
-  aspect-ratio: var(--stage-ar);
-  margin: 0 auto;
-  justify-self: center;
-  border-radius: 16px;
-  overflow: hidden;
-  border: 1.5px dashed rgba(99, 115, 165, 0.28);
-  background: #000;
+/* Thumbnail Grid (修正済み!) */
+.grid-wrap {
+  display: grid;
+  gap: 8px;
+  max-height: 68vh;
+  overflow-y: auto;
+  padding: 4px;
+  user-select: none;
+  align-content: start;
 }
+.grid-wrap.size-sm { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); }
+.grid-wrap.size-md { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
+.grid-wrap.size-lg { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.grid-wrap.drag-touch { touch-action: none; }
 
 .grid-item {
   position: relative; aspect-ratio: var(--stage-ar); border-radius: 8px;
@@ -213,15 +238,35 @@ select {
   background: rgba(239,68,68,0.45); color: #fff; font-size: 11px; font-weight: 800;
 }
 
+/* Blueprint Tab */
+.blueprint-svg-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  padding: 6px;
+}
+.blueprint-svg-wrap svg { width: 100%; min-width: 680px; height: auto; display: block; }
+.blueprint-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.bp-card {
+  background: var(--card-2); border: 1px solid var(--border); border-radius: 14px;
+  padding: 14px; display: grid; gap: 6px; font-size: 13px;
+}
+
 /* Modal, Info, PowerSave */
 .modal-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(10, 14, 26, 0.55); backdrop-filter: blur(6px); display: none; place-items: center; padding: 16px; }
 .modal-backdrop.open { display: grid; }
 .modal-card { width: 100%; max-width: 440px; background: var(--card); border: 1px solid var(--border); border-radius: 20px; box-shadow: var(--shadow); padding: 20px; display: grid; gap: 14px; }
+.export-summary {
+  background: var(--card-2); border-radius: 12px; padding: 12px;
+  font-size: 12px; line-height: 1.7; color: var(--text);
+}
 
 .progress-wrap { display: none; gap: 5px; }
 .progress-wrap.active { display: grid; }
 .progress-bar { height: 7px; border-radius: 999px; background: var(--card-2); overflow: hidden; }
-.progress-fill { height: 100%; width: 0%; background: var(--btn-grad); }
+.progress-fill { height: 100%; width: 0%; background: var(--btn-grad); transition: width 0.12s; }
 .progress-text { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
 .download-links { display: grid; gap: 6px; }
 .dl-link { text-decoration: none; padding: 10px 12px; border-radius: 12px; background: rgba(16,185,129,0.14); color: var(--ok); font-size: 12px; font-weight: 700; text-align: center; }
@@ -235,11 +280,11 @@ select {
 .ps-stats { font-size: 26px; font-weight: 700; }
 .ps-hint { font-size: 12px; padding: 8px 16px; border: 1px solid #222; border-radius: 999px; cursor: pointer; }
 
-@media (max-width: 920px) {
+@media (max-width: 960px) {
   .record-grid, .edit-2pane { grid-template-columns: 1fr; }
   .edit-left-pane { position: static; }
-  .shell { grid-template-columns: 1fr; padding-bottom: 76px; }
+  .shell { grid-template-columns: 1fr; padding-bottom: 78px; }
   .sidebar { position: fixed; bottom: 10px; left: 10px; right: 10px; z-index: 50; padding: 8px; border-radius: 16px; }
   .shell.sidebar-collapsed .sidebar { display: none; }
-  .side-nav { grid-template-columns: repeat(4, 1fr); }
+  .side-nav { grid-template-columns: repeat(5, 1fr); }
 }

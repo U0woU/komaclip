@@ -8,6 +8,9 @@ export class KomaStorage {
 
   async init() {
     if (this.db) return this.db;
+    if (typeof indexedDB === 'undefined') {
+      throw new Error('このブラウザ環境では IndexedDB が利用できません。');
+    }
     return new Promise((resolve, reject) => {
       const req = indexedDB.open(this.dbName, this.version);
       req.onupgradeneeded = (e) => {
@@ -19,7 +22,14 @@ export class KomaStorage {
           db.createObjectStore('frames', { keyPath: 'id', autoIncrement: true });
         }
       };
-      req.onsuccess = () => { this.db = req.result; resolve(this.db); };
+      req.onsuccess = () => {
+        this.db = req.result;
+        this.db.onversionchange = () => {
+          this.db?.close();
+          this.db = null;
+        };
+        resolve(this.db);
+      };
       req.onerror = () => reject(req.error);
     });
   }
@@ -41,13 +51,18 @@ export class KomaStorage {
     });
   }
 
-  addFrame({ blob, thumbBlob, motion, excluded = false }) {
+  addFrame({ blob, thumbBlob, motion, elapsedMs = 0, excluded = false }) {
     return this._enqueue(async () => {
       const db = await this.init();
       return new Promise((resolve, reject) => {
         const tx = db.transaction('frames', 'readwrite');
         const req = tx.objectStore('frames').add({
-          blob, thumbBlob, motion, excluded, createdAt: Date.now()
+          blob,
+          thumbBlob,
+          motion,
+          elapsedMs,
+          excluded,
+          createdAt: Date.now()
         });
         req.onsuccess = () => resolve(req.result);
         tx.onerror = () => reject(tx.error);
@@ -88,12 +103,13 @@ export class KomaStorage {
       req.onsuccess = () => resolve(req.result || []);
       req.onerror = () => reject(req.error);
     });
-    const frames = records.map((r) => ({
+    const frames = records.map((r, idx) => ({
       id: r.id,
       blob: r.blob,
       thumbUrl: URL.createObjectURL(r.thumbBlob || r.blob),
-      motion: r.motion,
-      excluded: r.excluded
+      motion: typeof r.motion === 'number' ? r.motion : 10,
+      elapsedMs: typeof r.elapsedMs === 'number' ? r.elapsedMs : idx * 10000,
+      excluded: Boolean(r.excluded)
     }));
     return { meta, frames };
   }
