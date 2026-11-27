@@ -6,7 +6,8 @@ const RATIOS = { '16:9': [16, 9], '9:16': [9, 16], '4:3': [4, 3], '1:1': [1, 1] 
 
 // ===== State =====
 let previewStream = null;
-let facingMode = 'environment';
+let videoDevices = [];
+let selectedDeviceId = localStorage.getItem('komaclip_camera_id') || '';
 let wakeLock = null;
 let selectedRatio = '9:16', W = 480, H = 854;
 let isRecording = false, isPaused = false, isCapturing = false;
@@ -129,6 +130,118 @@ $('toggleGuideBtn').onclick = () => {
 calcOutputSize();
 renderGuide();
 
+// ===== Multi-Camera Enumeration & Selection (deviceId ベース) =====
+function getSelectedCameraLabel() {
+  const found = videoDevices.find(d => d.deviceId === selectedDeviceId);
+  if (found && found.label) return found.label;
+  const opt = $('cameraSelect').selectedOptions[0];
+  return opt ? opt.textContent : '既定カメラ';
+}
+
+async function refreshCameraList(requestPermissionIfHidden = false) {
+  if (!navigator.mediaDevices?.enumerateDevices) return [];
+
+  let devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+  const needsPermission = devices.length === 0 || devices.every(d => !d.deviceId || !d.label);
+
+  // 権限未許可だとブラウザ仕様でカメラ名・IDが空になるため、明示操作時のみ一瞬開いて即閉じる
+  if (requestPermissionIfHidden && needsPermission && navigator.mediaDevices?.getUserMedia) {
+    let tmp = null;
+    try {
+      tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    } finally {
+      if (tmp) tmp.getTracks().forEach(t => t.stop());
+    }
+    devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+  }
+
+  videoDevices = devices.filter(d => d.deviceId);
+  const sel = $('cameraSelect');
+  sel.innerHTML = '';
+
+  if (videoDevices.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'カメラ未検出（「構図確認」または「一覧更新」で許可してください）';
+    sel.appendChild(opt);
+    return videoDevices;
+  }
+
+  videoDevices.forEach((dev, idx) => {
+    const opt = document.createElement('option');
+    opt.value = dev.deviceId;
+    opt.textContent = dev.label || `カメラ ${idx + 1}`;
+    sel.appendChild(opt);
+  });
+
+  // 保存済みIDがまだ存在するならそれを復元、なければ先頭カメラを選択
+  if (selectedDeviceId && videoDevices.some(d => d.deviceId === selectedDeviceId)) {
+    sel.value = selectedDeviceId;
+  } else {
+    selectedDeviceId = videoDevices[0].deviceId;
+    sel.value = selectedDeviceId;
+    localStorage.setItem('komaclip_camera_id', selectedDeviceId);
+  }
+
+  return videoDevices;
+}
+
+$('cameraSelect').onchange = async () => {
+  if (isRecording) return;
+  selectedDeviceId = $('cameraSelect').value;
+  localStorage.setItem('komaclip_camera_id', selectedDeviceId);
+  $('hint').textContent = `使用カメラを変更しました: ${getSelectedCameraLabel()}`;
+  if (previewStream) {
+    stopPreviewStream();
+    await togglePreviewCamera();
+  }
+};
+
+$('refreshCamListBtn').onclick = async () => {
+  if (isRecording) return;
+  try {
+    const list = await refreshCameraList(true);
+    $('hint').textContent = list.length > 0
+      ? `カメラを ${list.length}台 検出しました（現在: ${getSelectedCameraLabel()}）`
+      : '利用可能なカメラが見つかりませんでした';
+  } catch (e) {
+    $('hint').textContent = 'カメラ一覧の取得に失敗: ' + e.message;
+  }
+};
+
+$('switchCamBtn').onclick = async () => {
+  if (isRecording) return;
+  try {
+    if (videoDevices.length < 2) {
+      await refreshCameraList(true);
+    }
+    if (videoDevices.length < 2) {
+      $('hint').textContent = `検出されたカメラは ${videoDevices.length}台 のみです（USB接続を確認してください）`;
+      return;
+    }
+    const curIdx = videoDevices.findIndex(d => d.deviceId === selectedDeviceId);
+    const nextIdx = (curIdx + 1) % videoDevices.length;
+    selectedDeviceId = videoDevices[nextIdx].deviceId;
+    $('cameraSelect').value = selectedDeviceId;
+    localStorage.setItem('komaclip_camera_id', selectedDeviceId);
+
+    if (previewStream) {
+      stopPreviewStream();
+      await togglePreviewCamera();
+    } else {
+      $('hint').textContent = `カメラを切り替えました (${nextIdx + 1}/${videoDevices.length}): ${getSelectedCameraLabel()}`;
+    }
+  } catch (e) {
+    $('hint').textContent = 'カメラ切替エラー: ' + e.message;
+  }
+};
+
+if (navigator.mediaDevices?.addEventListener) {
+  navigator.mediaDevices.addEventListener('devicechange', () => {
+    refreshCameraList(false).catch(() => {});
+  });
+}
+
 // ===== Camera Control (On-Demand Start & Immediate Stop) =====
 function stopPreviewStream() {
   if (previewStream) {
@@ -147,15 +260,30 @@ async function openCameraStream() {
   const base = Number($('resSelect').value || 854);
   const idealW = base >= 1920 ? 1920 : 1280;
   const idealH = base >= 1920 ? 1080 : 720;
-  return navigator.mediaDevices.getUserMedia({
-    video: {
-      facingMode: { ideal: facingMode },
-      width: { ideal: idealW },
-      height: { ideal: idealH },
-      frameRate: { ideal: 30 }
-    },
-    audio: false
-  });
+
+  const videoConstraints = {
+    width: { ideal: idealW },
+    height: { ideal: idealH },
+    frameRate: { ideal: 30 }
+  };
+  if (selectedDeviceId) {
+    videoConstraints.deviceId = { exact: selectedDeviceId };
+  }
+
+  try {
+    return await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
+  } catch (err) {
+    // 選んだUSBカメラが抜けた等の場合は既定カメラへフォールバック
+    if (selectedDeviceId && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError')) {
+      selectedDeviceId = '';
+      localStorage.removeItem('komaclip_camera_id');
+      return await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: idealW }, height: { ideal: idealH }, frameRate: { ideal: 30 } },
+        audio: false
+      });
+    }
+    throw err;
+  }
 }
 
 async function waitVideoReady(videoEl, timeoutMs = 3000) {
@@ -184,12 +312,21 @@ async function togglePreviewCamera() {
     preview.srcObject = previewStream;
     await preview.play();
     await waitVideoReady(preview);
+
+    // 実際に開いたカメラのIDを同期し、全カメラ名リストを最新化
+    const activeId = previewStream.getVideoTracks()[0]?.getSettings()?.deviceId;
+    if (activeId) {
+      selectedDeviceId = activeId;
+      localStorage.setItem('komaclip_camera_id', activeId);
+    }
+    await refreshCameraList(false);
+
     $('lastShotImg').style.display = 'none';
     $('placeholder').style.display = 'none';
     $('camSleepBadge').style.display = 'none';
     $('connectCamBtn').textContent = '⏹ 構図確認を終了（カメラOFF）';
     setBadge('', '構図確認中');
-    $('hint').textContent = '画角を確認したら「間欠録画スタート」を押してください（自動で間欠駆動に切り替わります）';
+    $('hint').textContent = `構図確認中: ${getSelectedCameraLabel()} — 別のカメラにする場合は上のリストか「次のカメラへ」で切替できます`;
   } catch (e) {
     stopPreviewStream();
     setBadge('', 'エラー');
@@ -197,16 +334,6 @@ async function togglePreviewCamera() {
   }
 }
 $('connectCamBtn').onclick = $('heroCamBtn').onclick = togglePreviewCamera;
-$('switchCamBtn').onclick = async () => {
-  if (isRecording) return;
-  facingMode = facingMode === 'environment' ? 'user' : 'environment';
-  if (previewStream) {
-    stopPreviewStream();
-    await togglePreviewCamera();
-  } else {
-    $('hint').textContent = `使用カメラを ${facingMode === 'environment' ? '背面/外付け' : '前面'} に切り替えました`;
-  }
-};
 
 // ===== Crop & Motion Detection =====
 function drawCroppedTo(videoEl, ctx, dstW, dstH) {
@@ -258,11 +385,9 @@ async function captureOneShotBurst() {
     await tempVideo.play();
     await waitVideoReady(tempVideo);
 
-    // オート露出・ホワイトバランス安定待ち
     const warmupMs = Number($('warmupMsSelect')?.value || 600);
     await new Promise(r => setTimeout(r, warmupMs));
 
-    // 待機中に録画終了された場合は保存せず即座に抜ける
     if (!isRecording) return;
 
     const { score, snapshot } = evaluateMotion(tempVideo);
@@ -271,7 +396,6 @@ async function captureOneShotBurst() {
     const autoDrop = $('autoDropStillCheck').checked;
     const threshold = Number($('stillThreshold').value);
 
-    // 2枚目以降で動きが閾値未満なら「止まっている画像」として即破棄（基準画像 prevDiffData は更新しない）
     if (autoDrop && prevDiffData && score < threshold) {
       droppedStillCount++;
       updateStats();
@@ -316,7 +440,6 @@ async function captureOneShotBurst() {
   } catch (e) {
     $('hint').textContent = '撮影エラー: ' + e.message;
   } finally {
-    // 撮影が終わったら必ず即座にトラックを停止してカメラをオフにする
     if (tempStream) {
       tempStream.getTracks().forEach(t => t.stop());
     }
@@ -360,6 +483,14 @@ function startWorkerTimer() {
 }
 
 // ===== Recording Controls =====
+function setCameraUiDisabled(disabled) {
+  $('resSelect').disabled = disabled;
+  $('connectCamBtn').disabled = disabled;
+  $('switchCamBtn').disabled = disabled;
+  $('refreshCamListBtn').disabled = disabled;
+  $('cameraSelect').disabled = disabled;
+}
+
 $('startBtn').onclick = async () => {
   stopPreviewStream();
 
@@ -379,7 +510,8 @@ $('startBtn').onclick = async () => {
   lastTick = Date.now();
   nextShotTime = lastTick + Number($('intervalSelect').value);
 
-  $('startBtn').disabled = $('resSelect').disabled = $('connectCamBtn').disabled = $('switchCamBtn').disabled = true;
+  $('startBtn').disabled = true;
+  setCameraUiDisabled(true);
   $('pauseBtn').disabled = $('stopRecBtn').disabled = false;
   $('exportCard').style.display = 'none';
   $('downloadLinks').innerHTML = '';
@@ -412,7 +544,8 @@ $('stopRecBtn').onclick = () => {
   $('camSleepBadge').style.display = 'none';
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
 
-  $('startBtn').disabled = $('resSelect').disabled = $('connectCamBtn').disabled = $('switchCamBtn').disabled = false;
+  $('startBtn').disabled = false;
+  setCameraUiDisabled(false);
   $('pauseBtn').disabled = $('stopRecBtn').disabled = true;
   $('pauseBtn').textContent = '⏸ 一時停止';
   setBadge('done', '撮影完了');
@@ -472,7 +605,6 @@ $('exportWebmBtn').onclick = async () => {
 
       setProgress(true, `WebM生成中... (${i + 1}/${frames.length})`, ((i + 1) / frames.length) * 96);
 
-      // デコード時間を含めたドリフト補正でフレーム間隔を安定化
       const nextTarget = t0 + (i + 1) * delay;
       const waitMs = Math.max(0, nextTarget - performance.now());
       await new Promise(r => setTimeout(r, waitMs));
@@ -504,7 +636,7 @@ $('exportWebmBtn').onclick = async () => {
   }
 };
 
-// ===== DB Clear & Restore =====
+// ===== DB Clear & Startup =====
 $('settingsClearDbBtn').onclick = async () => {
   if (!confirm('保存されている撮影データをすべて消去しますか？')) return;
   try { await storage.clearAll(); } catch {}
@@ -522,6 +654,7 @@ $('settingsClearDbBtn').onclick = async () => {
 };
 
 (async () => {
+  try { await refreshCameraList(false); } catch {}
   try {
     const restored = await storage.restoreAll();
     if (restored.frames.length > 0) {

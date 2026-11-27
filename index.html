@@ -11,6 +11,7 @@
     { match: /CORS|Failed to fetch dynamically imported module|origin 'null'/i, msg: 'index.html を直接ダブルクリック（file://）で開いている可能性があります。VS Code の Live Server や `python -m http.server`、または GitHub Pages 経由で開いてください。' },
     { match: /is null|Cannot read properties of null|Cannot read properties of undefined/i, msg: 'HTMLとJSのバージョンズレ（ID不足）またはブラウザキャッシュの可能性があります。Ctrl+Shift+R（MacはCmd+Shift+R）でスーパーリロードしてください。' },
     { match: /allocate videosource|NotReadableError/i, msg: 'カメラが他のアプリや別タブで使用中、または連続再接続でカメラドライバが一時停止した可能性があります。別タブを閉じるかUSBを挿し直してください。' },
+    { match: /OverconstrainedError/i, msg: '選択したカメラが取り外されたか、指定解像度に対応していない可能性があります。別のカメラを選び直すか解像度を下げてください。' },
     { match: /NotAllowedError|Permission denied/i, msg: 'カメラのアクセス権限が拒否されています。アドレスバー左のアイコンから許可してください。' },
     { match: /IndexedDB|QuotaExceededError/i, msg: 'ブラウザの保存容量不足、またはプライベートブラウズによる保存制限の可能性があります。' }
   ];
@@ -83,7 +84,7 @@
   });
 })();
 </script>
-  <link rel="stylesheet" href="./style.css?v=6">
+  <link rel="stylesheet" href="./style.css?v=7">
 </head>
 <body>
 <div class="shell" id="appShell">
@@ -191,7 +192,20 @@
 
       <!-- Settings Card -->
       <div class="card settings-card">
-        <div class="card-title">⚙️ 撮影＆WebM出力設定</div>
+        <div class="card-title">⚙️ カメラ選択・撮影＆WebM出力設定</div>
+        <div class="camera-select-bar">
+          <div class="field" style="flex:1; min-width:220px;">
+            <label for="cameraSelect">使用カメラ（デバイスID指定）</label>
+            <select id="cameraSelect">
+              <option value="">自動（既定カメラ）— 「構図確認」後に全カメラ名を取得</option>
+            </select>
+          </div>
+          <div class="btns" style="align-self:end;">
+            <button class="btn" id="refreshCamListBtn" title="USBカメラの抜き差し後に一覧を更新">🔍 一覧更新</button>
+            <button class="btn" id="switchCamBtn" title="検出された次のカメラへ順番に切替">🔄 次のカメラへ</button>
+          </div>
+        </div>
+
         <div class="settings-row">
           <div class="field">
             <label>比率</label>
@@ -245,7 +259,6 @@
       <div class="card action-dock">
         <div class="btns">
           <button class="btn" id="connectCamBtn">📷 構図確認（カメラON）</button>
-          <button class="btn" id="switchCamBtn">🔄 カメラ切替</button>
           <button class="btn btn-warn-soft" id="pauseBtn" disabled>⏸ 一時停止</button>
           <button class="btn btn-danger-soft" id="stopRecBtn" disabled>■ 撮影終了</button>
         </div>
@@ -296,6 +309,7 @@
       <div class="card">
         <div class="card-title">ℹ️ KomaClip（間欠撮影・素材出力専用）について</div>
         <ul class="info-list">
+          <li><strong>複数カメラ対応（デバイスID選択）：</strong>内蔵カメラとUSB外付けカメラなど複数台ある環境でも、<code>enumerateDevices()</code> で検出したカメラ名から直接選択・ワンクリック切替できます。</li>
           <li><strong>発熱防止の間欠駆動：</strong>撮影時のみ <code>getUserMedia</code> を呼び出して1枚撮影し、即座に <code>track.stop()</code> でカメラを物理停止します。</li>
           <li><strong>静止・離席の自動破棄：</strong>前回採用したフレームとの差分（64×36輝度平均差分）を計算し、閾値未満の静止画像は保存せず破棄します。</li>
           <li><strong>編集ソフト連携前提のWebM出力：</strong>ブラウザ内編集を廃止し、撮影した全採用コマを WebM（VP9/VP8）へ変換してダウンロードします。</li>
@@ -303,7 +317,7 @@
       </div>
     </section>
 
-    <div class="footer-hint" id="hint">準備完了 — 「構図確認」で画角を合わせるか、そのまま「間欠録画スタート」を押してください</div>
+    <div class="footer-hint" id="hint">準備完了 — まず「構図確認」または「一覧更新」でカメラを検出し、使うカメラを選んでください</div>
   </div>
 </div>
 
@@ -315,6 +329,6 @@
   <div class="ps-hint" id="psExitBtn">ダブルタップまたはクリックで復帰</div>
 </div>
 
-<script type="module" src="./app.js?v=6"></script>
+<script type="module" src="./app.js?v=7"></script>
 </body>
 </html>

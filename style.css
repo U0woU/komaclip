@@ -153,6 +153,10 @@ body {
   background: var(--card-2); padding: 10px 12px; border-radius: 12px;
 }
 
+.camera-select-bar {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: end;
+  padding-bottom: 10px; border-bottom: 1px solid var(--border);
+}
 .settings-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: end; }
 .field { display: grid; gap: 6px; }
 .field label { font-size: 11px; color: var(--muted); font-weight: 700; }
@@ -160,6 +164,7 @@ select {
   height: 38px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--border);
   background: var(--card-2); color: var(--text); font-family: inherit; font-size: 12px; font-weight: 600; width: 100%;
 }
+select:disabled { opacity: 0.45; cursor: not-allowed; }
 input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
 
 .ratio-group { display: flex; gap: 4px; padding: 3px; border-radius: 12px; background: var(--card-2); border: 1px solid var(--border); }
