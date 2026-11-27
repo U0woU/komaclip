@@ -1,54 +1,17 @@
 <!DOCTYPE html>
-<!--
-================================================================================
-  KomaClip — 勉強タイムラプスアプリ おおまかな理想図（全体設計）
-================================================================================
-
-  [STEP 1: 録画タブ 🎬]
-    10秒に1枚（変更可）カメラから自動撮影 → 1枚ごとにIndexedDBへ自動保存
-    ・構図ガイド（ノート/三分割/水平）で手元を合わせる
-    ・比率選択（16:9 / 9:16 / 4:3 / 1:1）＆ 解像度（480p/720p/1080p）
-    ・バックグラウンド対策（Web Worker タイマー + PiP + 省電力ブラックアウト）
-
-            │ 録画終了（またはデモ生成）
-            ▼
-
-  [STEP 2: 編集タブ ✂️]  ※プレビュー＝MP4出力の完全一致（WYSIWYG）
-    ┌──────────────────────────┬─────────────────────────────────────┐
-    │ 左ペイン：プレビュー＆調整 │ 右ペイン：コマ一覧グリッド            │
-    │ ・Canvas実時間プレビュー   │ ・小/中/大サイズ切替                 │
-    │ ・再生/停止 & コマ送り     │ ・ドラッグなぞりで一気に除外/復元     │
-    │ ・[カット] 前後一括/離席   │ ・離席（静止）フレーム自動ハイライト  │
-    │ ・[GIF] 右下GIF/内蔵バッジ │ ・間引き（2倍速化）                   │
-    │ ・[色調] 明度/対比/回転    │                                       │
-    │ ・[文字] タイマー/タイトル │                                       │
-    └──────────────────────────┴─────────────────────────────────────┘
-
-            │ 「🎥 MP4書き出し」ボタン
-            ▼
-
-  [STEP 3: 書き出しモーダル 🎥]
-    ・有効フレームのみに「色調＋回転＋タイマー＋文字＋右下GIFアニメ」を合成
-    ・WebCodecs (VideoEncoder + mp4-muxer) で高速にローカルMP4生成
-    ・非対応ブラウザ時は MediaRecorder 互換モードへ自動フォールバック
-    ・100%ブラウザ内完結（サーバー送信なし）
-
-================================================================================
--->
-<html lang="ja" data-theme="light">
+<html lang="ja" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>KomaClip — 勉強タイムラプス</title>
+  <title>KomaClip — 省電力・勉強タイムラプス撮影</title>
   <script>
 // ===== エラー自動検知＆確認パネル（KomaClip Guard） =====
 (function () {
   const hints = [
     { match: /CORS|Failed to fetch dynamically imported module|origin 'null'/i, msg: 'index.html を直接ダブルクリック（file://）で開いている可能性があります。VS Code の Live Server や `python -m http.server`、または GitHub Pages 経由で開いてください。' },
     { match: /is null|Cannot read properties of null|Cannot read properties of undefined/i, msg: 'HTMLとJSのバージョンズレ（ID不足）またはブラウザキャッシュの可能性があります。Ctrl+Shift+R（MacはCmd+Shift+R）でスーパーリロードしてください。' },
-    { match: /allocate videosource|NotReadableError/i, msg: 'カメラが他のアプリや別タブで使用中です。Zoomや別タブを閉じて再接続してください。' },
+    { match: /allocate videosource|NotReadableError/i, msg: 'カメラが他のアプリや別タブで使用中、または連続再接続でカメラドライバが一時停止した可能性があります。別タブを閉じるかUSBを挿し直してください。' },
     { match: /NotAllowedError|Permission denied/i, msg: 'カメラのアクセス権限が拒否されています。アドレスバー左のアイコンから許可してください。' },
-    { match: /firstTimestampBehavior|mp4-muxer|VideoEncoder/i, msg: 'MP4エンコード時のエラーです。自動で互換モードへ切り替わるか、解像度を480p/720pに下げてお試しください。' },
     { match: /IndexedDB|QuotaExceededError/i, msg: 'ブラウザの保存容量不足、またはプライベートブラウズによる保存制限の可能性があります。' }
   ];
 
@@ -120,24 +83,21 @@
   });
 })();
 </script>
-  <link rel="stylesheet" href="./style.css?v=4">
+  <link rel="stylesheet" href="./style.css?v=6">
 </head>
 <body>
 <div class="shell" id="appShell">
-  <!-- Left Collapsible Icon Sidebar -->
+  <!-- Minimal Left Sidebar -->
   <aside class="sidebar" id="sidebar">
     <nav class="side-nav">
-      <button class="nav-item active" data-tab="record" title="録画">🎬</button>
-      <button class="nav-item" data-tab="edit" title="編集・GIF・MP4">✂️</button>
-      <button class="nav-item" data-tab="blueprint" title="理想図・全体設計">🗺️</button>
-      <button class="nav-item" data-tab="settings" title="設定・ストレージ">⚙️</button>
-      <button class="nav-item" data-tab="info" title="使い方・情報">ℹ️</button>
+      <button class="nav-item active" data-tab="record" title="撮影・WebM出力">🎬</button>
+      <button class="nav-item" data-tab="settings" title="ストレージ・設定">⚙️</button>
+      <button class="nav-item" data-tab="info" title="仕様・使い方">ℹ️</button>
     </nav>
   </aside>
 
   <!-- Main Workspace -->
   <div class="main">
-    <!-- Minimal Topbar -->
     <header class="topbar">
       <div class="top-left">
         <button class="pill-btn icon-only" id="sidebarToggleBtn" title="サイドバー開閉">☰</button>
@@ -148,34 +108,36 @@
       </div>
       <div class="top-actions">
         <div class="badge" id="badge"><span class="led"></span><span id="badgeText">待機中</span></div>
-        <button class="pill-btn" id="pipBtn" disabled title="バックグラウンド時のズレ防止">📌 PiP</button>
-        <button class="pill-btn" id="powerSaveBtn" title="省電力ブラックアウト">🔋 省電力</button>
-        <button class="pill-btn" id="themeBtn">☀️ ライト</button>
+        <button class="pill-btn" id="powerSaveBtn" title="画面を暗くして省電力化">🔋 省電力</button>
+        <button class="pill-btn" id="themeBtn">🌙 ダーク</button>
       </div>
     </header>
 
-    <!-- TAB 1: RECORD -->
+    <!-- TAB 1: RECORD & DIRECT WEBM EXPORT -->
     <section class="tab-panel active" id="tab-record">
       <div class="record-grid">
         <!-- Main Stage Card -->
         <div class="card stage-card">
           <div class="stage-head">
-            <span class="stage-title" id="guideLabel">▶ ノート・手元ガイド (16:9)</span>
+            <span class="stage-title" id="guideLabel">▶ ノート・手元ガイド (9:16)</span>
             <button class="mini-pill" id="toggleGuideBtn">👁️ ガイド切替</button>
           </div>
 
           <div class="stage-wrap" id="stageWrap">
             <video id="preview" autoplay muted playsinline></video>
+            <img id="lastShotImg" alt="最新撮影コマ">
 
             <div class="stage-placeholder" id="placeholder">
-              <div class="hero-icon">🎬</div>
-              <h2>勉強タイムラプスを撮ろう！</h2>
-              <p>10秒に1枚自動で撮影 → 軽く編集＆右下GIF合成 → MP4で出力</p>
+              <div class="hero-icon">📷</div>
+              <h2>発熱防止・間欠撮影モード</h2>
+              <p>撮影の瞬間だけカメラを起動してすぐ停止。編集は外部ソフト前提で、静止（離席）コマを自動除外してWebM出力します。</p>
               <div class="hero-btns">
-                <button class="btn btn-primary btn-lg" id="heroCamBtn">📷 カメラ接続</button>
-                <button class="btn btn-lg" id="demoBtn">✨ デモで編集を試す</button>
-                <button class="btn btn-lg" id="openBlueprintBtn">🗺️ 理想図を見る</button>
+                <button class="btn btn-primary btn-lg" id="heroCamBtn">📷 構図テスト接続</button>
               </div>
+            </div>
+
+            <div class="cam-sleep-badge" id="camSleepBadge" style="display:none;">
+              💤 カメラ停止中（次の撮影まで待機）
             </div>
 
             <div class="guide-layer" id="guideLayer"></div>
@@ -184,12 +146,12 @@
           </div>
         </div>
 
-        <!-- Right Column: Status -->
+        <!-- Right Column: Status & Auto-Still Filter -->
         <div class="card status-card">
-          <div class="card-title">📊 撮影ステータス</div>
+          <div class="card-title">📊 撮影・静止除外ステータス</div>
           <div class="stats-grid">
             <div class="stat-box tint-blue">
-              <div class="stat-label">撮影枚数</div>
+              <div class="stat-label">採用コマ数</div>
               <div class="stat-val" id="frameCount">0<span>枚</span></div>
             </div>
             <div class="stat-box tint-purple">
@@ -197,30 +159,45 @@
               <div class="stat-val" id="elapsed">00:00</div>
             </div>
             <div class="stat-box tint-mint">
-              <div class="stat-label">仕上がり</div>
+              <div class="stat-label">WebM長さ</div>
               <div class="stat-val" id="estDuration">0.0<span>秒</span></div>
             </div>
-            <div class="stat-box tint-green">
-              <div class="stat-label">自動保存</div>
-              <div class="stat-val ok-text" id="dbStatus">準備完了</div>
+            <div class="stat-box tint-warn">
+              <div class="stat-label">静止破棄</div>
+              <div class="stat-val" id="droppedCount">0<span>枚</span></div>
             </div>
           </div>
-          <div class="mini-flow-note">
-            <strong>💡 おすすめの流れ</strong><br>
-            ① 10秒間隔で撮影 → ② 離席カット＆右下GIF追加 → ③ MP4保存
+
+          <div class="still-box">
+            <div class="row-between">
+              <label class="check-row">
+                <input type="checkbox" id="autoDropStillCheck" checked>
+                <span>🟠 静止・離席を自動破棄</span>
+              </label>
+              <span id="stillThVal" class="muted-text">感度 3.5</span>
+            </div>
+            <input type="range" id="stillThreshold" min="1" max="15" step="0.5" value="3.5">
+            <div class="muted-text" style="font-size:11px;">
+              前回コマと動きがほぼ同じ（閾値未満）の画像は保存せず即破棄します。
+            </div>
+          </div>
+
+          <div class="mini-flow-note" id="camStateNote">
+            <strong>🌡️ カメラ保護（間欠駆動）:</strong><br>
+            撮影時のみ起動 → 1枚保存 → 即 <code>track.stop()</code> で発熱を防止します。
           </div>
         </div>
       </div>
 
       <!-- Settings Card -->
       <div class="card settings-card">
-        <div class="card-title">⚙️ 録画設定（勉強タイムラプス規定値：10秒に1枚）</div>
+        <div class="card-title">⚙️ 撮影＆WebM出力設定</div>
         <div class="settings-row">
           <div class="field">
-            <label>録画比率</label>
+            <label>比率</label>
             <div class="ratio-group" id="ratioGroup">
-              <button class="ratio-btn active" data-ratio="16:9">16:9</button>
-              <button class="ratio-btn" data-ratio="9:16">9:16</button>
+              <button class="ratio-btn active" data-ratio="9:16">9:16</button>
+              <button class="ratio-btn" data-ratio="16:9">16:9</button>
               <button class="ratio-btn" data-ratio="4:3">4:3</button>
               <button class="ratio-btn" data-ratio="1:1">1:1</button>
             </div>
@@ -228,15 +205,15 @@
           <div class="field">
             <label for="intervalSelect">撮影間隔</label>
             <select id="intervalSelect">
-              <option value="2000">2秒（テスト用）</option>
-              <option value="5000">5秒（30分以内）</option>
+              <option value="5000">5秒（テスト・短時間）</option>
               <option value="10000" selected>10秒（1〜2時間・規定）</option>
+              <option value="15000">15秒（長時間）</option>
               <option value="20000">20秒（3時間以上）</option>
               <option value="30000">30秒（超長時間）</option>
             </select>
           </div>
           <div class="field">
-            <label for="resSelect">録画品質</label>
+            <label for="resSelect">解像度</label>
             <select id="resSelect">
               <option value="854" selected>480p SD（省電力・規定）</option>
               <option value="1280">720p HD（標準）</option>
@@ -244,7 +221,7 @@
             </select>
           </div>
           <div class="field">
-            <label for="fpsSelect">再生FPS</label>
+            <label for="fpsSelect">WebM FPS</label>
             <select id="fpsSelect">
               <option value="10">10 fps</option>
               <option value="15" selected>15 fps（規定）</option>
@@ -264,414 +241,80 @@
         </div>
       </div>
 
-      <!-- Bottom Floating Action Dock -->
+      <!-- Bottom Action Dock -->
       <div class="card action-dock">
         <div class="btns">
-          <button class="btn" id="connectCamBtn">📷 カメラ接続</button>
-          <button class="btn" id="switchCamBtn" disabled>🔄 切替</button>
+          <button class="btn" id="connectCamBtn">📷 構図確認（カメラON）</button>
+          <button class="btn" id="switchCamBtn">🔄 カメラ切替</button>
           <button class="btn btn-warn-soft" id="pauseBtn" disabled>⏸ 一時停止</button>
-          <button class="btn btn-danger-soft" id="finishBtn" disabled>■ 終了して編集</button>
-        </div>
-        <button class="btn btn-primary btn-lg" id="startBtn" disabled>▶ 録画開始</button>
-      </div>
-    </section>
-
-    <!-- TAB 2: EDIT (WYSIWYG リアルタイムプレビュー＆軽い編集) -->
-    <section class="tab-panel" id="tab-edit">
-      <div class="edit-header-bar">
-        <div class="edit-header-left">
-          <strong>✂️ タイムラプス編集</strong>
-          <span id="editorStats" class="muted-text">フレームがありません（録画するかデモを生成してください）</span>
+          <button class="btn btn-danger-soft" id="stopRecBtn" disabled>■ 撮影終了</button>
         </div>
         <div class="btns">
-          <button class="btn" id="editDemoBtn">✨ デモ読込</button>
-          <button class="btn btn-primary" id="openExportModalBtn">🎥 MP4書き出しへ</button>
+          <button class="btn btn-ok-soft" id="exportWebmBtn" disabled>⬇ WebM書き出し (0枚)</button>
+          <button class="btn btn-primary btn-lg" id="startBtn">▶ 間欠録画スタート</button>
         </div>
       </div>
 
-      <div class="edit-2pane">
-        <!-- Left Pane: Live Composite Preview & Tool Tabs -->
-        <div class="card edit-left-pane">
-          <div class="edit-stage">
-            <canvas id="editorCanvas"></canvas>
-            <div class="edit-empty" id="editEmptyState">
-              <div>🖼️ フレームがありません</div>
-              <span class="muted-text">録画終了後、または「デモ読込」で編集できます</span>
-            </div>
-          </div>
-
-          <div class="row-between">
-            <div class="btns">
-              <button class="btn btn-primary" id="playPreviewBtn">▶ 再生</button>
-              <button class="btn" id="prevFrameBtn" title="前のコマ">◀</button>
-              <button class="btn" id="nextFrameBtn" title="次のコマ">▶</button>
-            </div>
-            <span id="currentFrameInfo" class="muted-text">#0 / 0</span>
-          </div>
-
-          <!-- Sub-tabs for Light Editing -->
-          <div class="subtab-bar" id="editToolTabs">
-            <button class="subtab-btn active" data-tool="cut">✂️ カット</button>
-            <button class="subtab-btn" data-tool="gif">🎨 右下GIF</button>
-            <button class="subtab-btn" data-tool="look">🎛️ 色調・回転</button>
-            <button class="subtab-btn" data-tool="text">🏷️ 文字・時計</button>
-          </div>
-
-          <!-- Tool 1: Cut -->
-          <div class="tool-panel active" id="tool-cut">
-            <div class="cut-group">
-              <div class="field-label">範囲一括カット（現在位置基準）</div>
-              <div class="btns">
-                <button class="btn btn-danger-soft" id="cutBeforeBtn" style="flex:1;">⏮ 前を全除外</button>
-                <button class="btn btn-danger-soft" id="cutAfterBtn" style="flex:1;">後ろを全除外 ⏭</button>
-              </div>
-            </div>
-
-            <hr class="divider">
-
-            <div class="cut-group">
-              <div class="row-between">
-                <span class="field-label">🟠 離席・静止の自動検出</span>
-                <span id="stillCountLabel" class="muted-text">0枚</span>
-              </div>
-              <input type="range" id="stillThreshold" min="1" max="15" step="0.5" value="3.5">
-              <div class="btns">
-                <button class="btn btn-warn-soft" id="excludeStillBtn" style="flex:1;">🧹 静止を除外</button>
-                <button class="btn" id="thinFramesBtn" title="有効フレームを1枚おきに除外して2倍速にします">⏩ 2倍速間引き</button>
-                <button class="btn" id="restoreAllBtn">↺ 全復元</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Tool 2: Corner GIF / Stamp -->
-          <div class="tool-panel" id="tool-gif">
-            <div class="cut-group">
-              <div class="field-label">アップロード（GIFアニメ / PNG / WebP）</div>
-              <div class="btns">
-                <label class="btn btn-primary" for="gifFileInput">📁 GIFを選ぶ</label>
-                <input type="file" id="gifFileInput" accept="image/gif,image/png,image/webp" hidden>
-                <button class="btn btn-danger-soft" id="removeGifBtn" style="display:none;">✕ 外す</button>
-              </div>
-              <div id="gifStatusText" class="muted-text">未設定（下の内蔵スタンプも使えます）</div>
-            </div>
-
-            <div class="cut-group">
-              <div class="field-label">内蔵ミニアニメスタンプ（GIFなしでもOK）</div>
-              <div class="ratio-group" id="stampPresetGroup">
-                <button class="ratio-btn active" data-stamp="none">なし</button>
-                <button class="ratio-btn" data-stamp="study">🔥 勉強中</button>
-                <button class="ratio-btn" data-stamp="focus">✨ 集中</button>
-                <button class="ratio-btn" data-stamp="rec">● REC</button>
-              </div>
-            </div>
-
-            <div class="cut-group">
-              <div class="field-label">配置コーナー</div>
-              <div class="ratio-group" id="gifPosGroup">
-                <button class="ratio-btn active" data-pos="br">右下</button>
-                <button class="ratio-btn" data-pos="bl">左下</button>
-                <button class="ratio-btn" data-pos="tr">右上</button>
-                <button class="ratio-btn" data-pos="tl">左上</button>
-              </div>
-            </div>
-
-            <div class="slider-row">
-              <div class="row-between"><span class="field-label">サイズ</span><span id="gifSizeVal" class="muted-text">18%</span></div>
-              <input type="range" id="gifSizeRange" min="8" max="36" step="1" value="18">
-            </div>
-            <div class="slider-row">
-              <div class="row-between"><span class="field-label">不透明度</span><span id="gifOpacityVal" class="muted-text">100%</span></div>
-              <input type="range" id="gifOpacityRange" min="20" max="100" step="5" value="100">
-            </div>
-            <div class="slider-row">
-              <div class="row-between"><span class="field-label">端からの余白</span><span id="gifMarginVal" class="muted-text">3%</span></div>
-              <input type="range" id="gifMarginRange" min="0" max="10" step="0.5" value="3">
-            </div>
-          </div>
-
-          <!-- Tool 3: Color & Transform -->
-          <div class="tool-panel" id="tool-look">
-            <div class="cut-group">
-              <div class="field-label">かんたんフィルター</div>
-              <div class="ratio-group" id="filterPresetGroup">
-                <button class="ratio-btn active" data-preset="none">標準</button>
-                <button class="ratio-btn" data-preset="crisp">ノート鮮明</button>
-                <button class="ratio-btn" data-preset="warm">カフェ風</button>
-                <button class="ratio-btn" data-preset="mono">モノクロ</button>
-              </div>
-            </div>
-            <div class="slider-row">
-              <div class="row-between"><span class="field-label">明るさ</span><span id="brightVal" class="muted-text">100%</span></div>
-              <input type="range" id="brightRange" min="60" max="150" step="2" value="100">
-            </div>
-            <div class="slider-row">
-              <div class="row-between"><span class="field-label">コントラスト</span><span id="contrastVal" class="muted-text">100%</span></div>
-              <input type="range" id="contrastRange" min="60" max="160" step="2" value="100">
-            </div>
-            <div class="slider-row">
-              <div class="row-between"><span class="field-label">彩度</span><span id="satVal" class="muted-text">100%</span></div>
-              <input type="range" id="satRange" min="0" max="180" step="5" value="100">
-            </div>
-            <div class="btns">
-              <button class="btn" id="rotateBtn" style="flex:1;">🔄 90°回転 (<span id="rotateVal">0°</span>)</button>
-              <button class="btn" id="flipBtn">↔️ 左右反転</button>
-              <button class="btn" id="resetLookBtn">↺ リセット</button>
-            </div>
-          </div>
-
-          <!-- Tool 4: Timer & Text Overlay -->
-          <div class="tool-panel" id="tool-text">
-            <label class="check-row">
-              <input type="checkbox" id="showTimerCheck">
-              <span>⏱️ 勉強経過タイマーを焼き込む（左上）</span>
-            </label>
-            <div class="field">
-              <label for="watermarkInput">タイトル / メモ透かし（左下）</label>
-              <input type="text" id="watermarkInput" class="text-input" placeholder="例: #勉強記録 数学・過去問 2h" maxlength="40">
-            </div>
-            <div class="field">
-              <label for="exportFpsSelect">書き出しFPS（再生速度）</label>
-              <select id="exportFpsSelect">
-                <option value="10">10 fps（ゆったり）</option>
-                <option value="15" selected>15 fps（勉強タイムラプス標準）</option>
-                <option value="24">24 fps（なめらか）</option>
-                <option value="30">30 fps（高速）</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right Pane: Wide Grid -->
-        <div class="card edit-right-pane">
-          <div class="row-between">
-            <span class="muted-text">左クリック長押しスライドで一気に除外／復元（←→移動・Space再生・Del除外）</span>
-            <div class="grid-controls">
-              <div class="ratio-group" id="gridSizeGroup" style="width:120px;">
-                <button class="ratio-btn" data-size="sm">小</button>
-                <button class="ratio-btn active" data-size="md">中</button>
-                <button class="ratio-btn" data-size="lg">大</button>
-              </div>
-              <label class="muted-text" style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-                <input type="checkbox" id="touchDragCheck"> なぞり
-              </label>
-            </div>
-          </div>
-          <div class="grid-wrap size-md" id="gridWrap"></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 3: BLUEPRINT (おおまかな理想図) -->
-    <section class="tab-panel" id="tab-blueprint">
-      <div class="card">
+      <!-- Export Progress & Download Box -->
+      <div class="card" id="exportCard" style="display:none;">
         <div class="row-between">
-          <div>
-            <div class="card-title" style="font-size:16px;">🗺️ KomaClip おおまかな理想図（構成＆ワークフロー）</div>
-            <p class="muted-text" style="margin-top:4px;">10秒に1枚撮影 → 離席カット・右下GIF合成・軽い色調調整 → ローカルMP4出力までの全体像</p>
-          </div>
-          <button class="btn btn-primary" id="blueprintGoRecordBtn">🎬 録画タブへ戻る</button>
+          <strong style="font-size:13px;">🎞️ WebM動画書き出し（編集ソフト用素材）</strong>
+          <span class="muted-text" id="dbStatus">保存完了</span>
         </div>
-
-        <!-- Visual Architecture Diagram (SVG) -->
-        <div class="blueprint-svg-wrap">
-          <svg viewBox="0 0 960 440" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="KomaClip 理想図">
-            <defs>
-              <linearGradient id="bpGrad1" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stop-color="#5b6cf9"/>
-                <stop offset="100%" stop-color="#38bdf8"/>
-              </linearGradient>
-              <linearGradient id="bpGrad2" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stop-color="#10b981"/>
-                <stop offset="100%" stop-color="#34d399"/>
-              </linearGradient>
-              <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                <path d="M 0 1 L 10 5 L 0 9 z" fill="#5b6cf9"/>
-              </marker>
-            </defs>
-
-            <!-- Background -->
-            <rect x="0" y="0" width="960" height="440" rx="18" fill="var(--card-2)"/>
-
-            <!-- STEP 1: RECORD -->
-            <rect x="24" y="28" width="276" height="230" rx="16" fill="var(--card)" stroke="#5b6cf9" stroke-width="2"/>
-            <rect x="24" y="28" width="276" height="40" rx="16" fill="url(#bpGrad1)"/>
-            <rect x="24" y="52" width="276" height="16" fill="url(#bpGrad1)"/>
-            <text x="162" y="53" text-anchor="middle" fill="#fff" font-size="14" font-weight="800">① 撮影（10秒に1枚）</text>
-
-            <!-- Mini wireframe inside Step 1 -->
-            <rect x="44" y="84" width="150" height="90" rx="10" fill="#111827"/>
-            <rect x="64" y="98" width="110" height="62" rx="6" fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="5 4"/>
-            <text x="119" y="133" text-anchor="middle" fill="#93c5fd" font-size="11" font-weight="700">ノート・手元プレビュー</text>
-            <rect x="204" y="84" width="78" height="40" rx="8" fill="rgba(91,108,249,0.14)"/>
-            <text x="243" y="102" text-anchor="middle" fill="var(--text)" font-size="10" font-weight="700">10秒タイマー</text>
-            <text x="243" y="116" text-anchor="middle" fill="#5b6cf9" font-size="10" font-weight="800">Web Worker</text>
-            <rect x="204" y="132" width="78" height="42" rx="8" fill="rgba(16,185,129,0.14)"/>
-            <text x="243" y="150" text-anchor="middle" fill="var(--text)" font-size="10" font-weight="700">自動保存</text>
-            <text x="243" y="164" text-anchor="middle" fill="#10b981" font-size="10" font-weight="800">IndexedDB</text>
-
-            <text x="44" y="198" fill="var(--muted)" font-size="11">• PiP / 省電力モードで長時間勉強OK</text>
-            <text x="44" y="218" fill="var(--muted)" font-size="11">• 動きの差分（motion）を自動計測</text>
-            <text x="44" y="238" fill="var(--muted)" font-size="11">• 16:9 / 9:16 / 4:3 / 1:1 比率連動</text>
-
-            <!-- Arrow 1 -> 2 -->
-            <line x1="306" y1="143" x2="338" y2="143" stroke="#5b6cf9" stroke-width="3" marker-end="url(#arrow)"/>
-
-            <!-- STEP 2: EDIT -->
-            <rect x="346" y="28" width="296" height="230" rx="16" fill="var(--card)" stroke="#5b6cf9" stroke-width="2"/>
-            <rect x="346" y="28" width="296" height="40" rx="16" fill="url(#bpGrad1)"/>
-            <rect x="346" y="52" width="296" height="16" fill="url(#bpGrad1)"/>
-            <text x="494" y="53" text-anchor="middle" fill="#fff" font-size="14" font-weight="800">② 軽い編集 &amp; 右下GIF合成</text>
-
-            <!-- Preview mockup with corner GIF & timer -->
-            <rect x="364" y="84" width="146" height="92" rx="10" fill="#1e293b"/>
-            <rect x="372" y="92" width="48" height="16" rx="4" fill="rgba(0,0,0,0.65)"/>
-            <text x="396" y="103" text-anchor="middle" fill="#fff" font-size="9" font-weight="700">⏱ 01:24</text>
-            <text x="372" y="168" fill="#e2e8f0" font-size="9">#勉強記録</text>
-            <!-- Corner GIF badge -->
-            <rect x="462" y="138" width="40" height="30" rx="6" fill="#f59e0b" stroke="#fff" stroke-width="1.5"/>
-            <text x="482" y="157" text-anchor="middle" fill="#fff" font-size="10" font-weight="800">GIF</text>
-
-            <!-- Thumbnail grid mockup -->
-            <g transform="translate(520,84)">
-              <rect x="0" y="0" width="32" height="24" rx="4" fill="#3b82f6"/>
-              <rect x="36" y="0" width="32" height="24" rx="4" fill="#3b82f6"/>
-              <rect x="72" y="0" width="32" height="24" rx="4" fill="#f59e0b"/>
-              <rect x="0" y="30" width="32" height="24" rx="4" fill="#ef4444" opacity="0.4"/>
-              <rect x="36" y="30" width="32" height="24" rx="4" fill="#3b82f6"/>
-              <rect x="72" y="30" width="32" height="24" rx="4" fill="#3b82f6"/>
-              <text x="52" y="72" text-anchor="middle" fill="var(--muted)" font-size="9">なぞり除外 / 離席カット</text>
-            </g>
-
-            <text x="364" y="198" fill="var(--muted)" font-size="11">• 右下GIFアニメ（サイズ・透過・位置調整）</text>
-            <text x="364" y="218" fill="var(--muted)" font-size="11">• 明るさ / コントラスト / 回転 / フィルター</text>
-            <text x="364" y="238" fill="var(--muted)" font-size="11">• 経過タイマー＆タイトル透かし＋2倍速間引き</text>
-
-            <!-- Arrow 2 -> 3 -->
-            <line x1="648" y1="143" x2="680" y2="143" stroke="#5b6cf9" stroke-width="3" marker-end="url(#arrow)"/>
-
-            <!-- STEP 3: EXPORT -->
-            <rect x="688" y="28" width="248" height="230" rx="16" fill="var(--card)" stroke="#10b981" stroke-width="2"/>
-            <rect x="688" y="28" width="248" height="40" rx="16" fill="url(#bpGrad2)"/>
-            <rect x="688" y="52" width="248" height="16" fill="url(#bpGrad2)"/>
-            <text x="812" y="53" text-anchor="middle" fill="#fff" font-size="14" font-weight="800">③ MP4 書き出し</text>
-
-            <rect x="716" y="88" width="192" height="54" rx="10" fill="rgba(16,185,129,0.12)" stroke="#10b981" stroke-width="1.5"/>
-            <text x="812" y="111" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="800">🎬 komaclip.mp4</text>
-            <text x="812" y="130" text-anchor="middle" fill="#10b981" font-size="10" font-weight="700">H.264 / WebCodecs 高速生成</text>
-
-            <text x="706" y="172" fill="var(--muted)" font-size="11">• プレビューと同じ合成結果を</text>
-            <text x="716" y="188" fill="var(--muted)" font-size="11">1フレームずつ高画質焼き込み</text>
-            <text x="706" y="212" fill="var(--muted)" font-size="11">• 非対応ブラウザは互換出力へ切替</text>
-            <text x="706" y="236" fill="var(--muted)" font-size="11">• 完全ローカル保存（通信不要）</text>
-
-            <!-- Bottom Summary Bar: Ideal Output Composition -->
-            <rect x="24" y="280" width="912" height="136" rx="16" fill="var(--card)" stroke="var(--border)" stroke-width="1.5"/>
-            <text x="44" y="308" fill="var(--text)" font-size="13" font-weight="800">📐 出力動画（MP4）1フレーム内の理想レイアウト</text>
-
-            <rect x="44" y="324" width="240" height="76" rx="10" fill="rgba(91,108,249,0.09)"/>
-            <text x="58" y="346" fill="#4f6ef7" font-size="12" font-weight="800">レイヤー1：ベース映像</text>
-            <text x="58" y="366" fill="var(--muted)" font-size="11">10秒間隔の勉強映像（クロップ済）</text>
-            <text x="58" y="384" fill="var(--muted)" font-size="11">＋ 明るさ・コントラスト・回転</text>
-
-            <rect x="304" y="324" width="290" height="76" rx="10" fill="rgba(245,158,11,0.10)"/>
-            <text x="318" y="346" fill="#d97706" font-size="12" font-weight="800">レイヤー2：右下GIF / スタンプ</text>
-            <text x="318" y="366" fill="var(--muted)" font-size="11">Canva等の透過GIFをフレーム同期再生</text>
-            <text x="318" y="384" fill="var(--muted)" font-size="11">サイズ(%)・位置・不透明度を自在に調整</text>
-
-            <rect x="614" y="324" width="302" height="76" rx="10" fill="rgba(16,185,129,0.10)"/>
-            <text x="628" y="346" fill="#10b981" font-size="12" font-weight="800">レイヤー3：勉強タイマー＆メモ</text>
-            <text x="628" y="366" fill="var(--muted)" font-size="11">左上：経過勉強時間（例 01:30:00）</text>
-            <text x="628" y="384" fill="var(--muted)" font-size="11">左下：科目やタグ（例 #勉強タイムラプス）</text>
-          </svg>
+        <div class="progress-wrap" id="progressWrap">
+          <div class="progress-text">
+            <span id="progressLabel">WebM生成中...</span>
+            <span id="progressPct">0%</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
         </div>
-
-        <div class="blueprint-cards">
-          <div class="bp-card">
-            <strong>🎯 目指す使い心地</strong>
-            <p class="muted-text">アプリを開いてすぐ録画開始でき、終わった直後に「離席をサッと消して、右下に推しGIFやスタンプをポンと載せて、10秒でMP4書き出し」できる軽快さ。</p>
-          </div>
-          <div class="bp-card">
-            <strong>⚡ 1時間勉強の目安</strong>
-            <p class="muted-text">10秒に1枚 ＝ 360枚。15fpsで書き出すとちょうど <strong>24秒</strong> のSNS・YouTubeショートにもぴったりなテンポの良い勉強タイムラプスになります。</p>
-          </div>
-          <div class="bp-card">
-            <strong>🛠️ 今後の拡張アイデア</strong>
-            <p class="muted-text">BGM（ロフィ音源）の合成、複数セッションの結合、SNS向け縦横自動リサイズなどへ拡張しやすいファイル分割構成になっています。</p>
-          </div>
-        </div>
+        <div class="download-links" id="downloadLinks"></div>
       </div>
     </section>
 
-    <!-- TAB 4: SETTINGS -->
+    <!-- TAB 2: SETTINGS -->
     <section class="tab-panel" id="tab-settings">
       <div class="card">
-        <div class="card-title">⚙️ ストレージ管理</div>
-        <p class="muted-text">撮影したフレームは1枚ごとにブラウザ内の IndexedDB へ自動保存されます。ブラウザを閉じても次回起動時に復元できます。</p>
+        <div class="card-title">⚙️ ストレージ＆カメラ設定</div>
+        <p class="muted-text">採用されたコマは1枚ずつ IndexedDB に保存されます。出力完了後や新規撮影前に消去できます。</p>
+        <div class="field" style="max-width:280px;">
+          <label for="warmupMsSelect">カメラ起動後の露出安定待ち時間</label>
+          <select id="warmupMsSelect">
+            <option value="350">350ms（最短・省電力）</option>
+            <option value="600" selected>600ms（標準・白飛び防止）</option>
+            <option value="1000">1000ms（露出安定重視）</option>
+          </select>
+        </div>
         <div class="btns">
           <button class="btn btn-danger-soft" id="settingsClearDbBtn">🗑️ IndexedDB の保存データを完全に消去</button>
         </div>
       </div>
     </section>
 
-    <!-- TAB 5: INFO -->
+    <!-- TAB 3: INFO -->
     <section class="tab-panel" id="tab-info">
       <div class="card">
-        <div class="card-title">ℹ️ KomaClip について</div>
+        <div class="card-title">ℹ️ KomaClip（間欠撮影・素材出力専用）について</div>
         <ul class="info-list">
-          <li><strong>100% ローカル処理：</strong>映像や画像はサーバーへ一切送信されません。</li>
-          <li><strong>バックグラウンド対策：</strong>Web Worker タイマー＋PiPにより、別タブ作業中でも撮影間隔のズレを防ぎます。</li>
-          <li><strong>プレビュー完全一致：</strong>編集画面で調整した右下GIF・色調・回転・タイマー・文字がそのままMP4へ書き出されます。</li>
-          <li><strong>ショートカット（編集）：</strong><code>←</code> <code>→</code> コマ移動、<code>Space</code> 再生/停止、<code>Delete</code> / <code>Backspace</code> 除外・復元。</li>
+          <li><strong>発熱防止の間欠駆動：</strong>撮影時のみ <code>getUserMedia</code> を呼び出して1枚撮影し、即座に <code>track.stop()</code> でカメラを物理停止します。</li>
+          <li><strong>静止・離席の自動破棄：</strong>前回採用したフレームとの差分（64×36輝度平均差分）を計算し、閾値未満の静止画像は保存せず破棄します。</li>
+          <li><strong>編集ソフト連携前提のWebM出力：</strong>ブラウザ内編集を廃止し、撮影した全採用コマを WebM（VP9/VP8）へ変換してダウンロードします。</li>
         </ul>
       </div>
     </section>
 
-    <div class="footer-hint" id="hint">準備完了 — 「カメラ接続」を押して構図を確認してください</div>
-  </div>
-</div>
-
-<!-- Export Modal -->
-<div class="modal-backdrop" id="exportModal">
-  <div class="modal-card">
-    <div class="row-between">
-      <strong style="font-size:15px;">🎥 MP4動画の書き出し</strong>
-      <button class="mini-pill" id="closeExportModalBtn">✕ 閉じる</button>
-    </div>
-
-    <div class="export-summary" id="exportSummary">
-      出力設定を確認中...
-    </div>
-
-    <div class="field">
-      <label for="exportQualitySelect">画質ビットレート</label>
-      <select id="exportQualitySelect">
-        <option value="3500000">標準（3.5 Mbps・軽量）</option>
-        <option value="6000000" selected>高画質（6.0 Mbps・推奨）</option>
-        <option value="10000000">超高画質（10.0 Mbps）</option>
-      </select>
-    </div>
-
-    <div class="progress-wrap" id="progressWrap">
-      <div class="progress-text">
-        <span id="progressLabel">MP4生成中...</span>
-        <span id="progressPct">0%</span>
-      </div>
-      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-    </div>
-
-    <button class="btn btn-primary btn-lg" id="exportMp4Btn" style="width:100%;">⬇ MP4動画を作成して保存</button>
-    <div class="download-links" id="downloadLinks"></div>
+    <div class="footer-hint" id="hint">準備完了 — 「構図確認」で画角を合わせるか、そのまま「間欠録画スタート」を押してください</div>
   </div>
 </div>
 
 <!-- Power-Save Overlay -->
 <div id="powerSaveOverlay">
   <div class="ps-dot"></div>
-  <div>省電力モード稼働中（撮影は継続しています）</div>
+  <div>省電力モード稼働中（間欠撮影は継続しています）</div>
   <div class="ps-stats" id="psStats">0枚 ・ 00:00</div>
   <div class="ps-hint" id="psExitBtn">ダブルタップまたはクリックで復帰</div>
 </div>
 
-<script type="module" src="./app.js?v=4"></script>
+<script type="module" src="./app.js?v=6"></script>
 </body>
 </html>

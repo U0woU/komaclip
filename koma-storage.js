@@ -51,39 +51,17 @@ export class KomaStorage {
     });
   }
 
-  addFrame({ blob, thumbBlob, motion, elapsedMs = 0, excluded = false }) {
+  addFrame({ blob, elapsedMs = 0 }) {
     return this._enqueue(async () => {
       const db = await this.init();
       return new Promise((resolve, reject) => {
         const tx = db.transaction('frames', 'readwrite');
         const req = tx.objectStore('frames').add({
           blob,
-          thumbBlob,
-          motion,
           elapsedMs,
-          excluded,
           createdAt: Date.now()
         });
         req.onsuccess = () => resolve(req.result);
-        tx.onerror = () => reject(tx.error);
-      });
-    });
-  }
-
-  setExcluded(id, excluded) {
-    return this._enqueue(async () => {
-      const db = await this.init();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction('frames', 'readwrite');
-        const store = tx.objectStore('frames');
-        const getReq = store.get(id);
-        getReq.onsuccess = () => {
-          const rec = getReq.result;
-          if (!rec) return resolve(false);
-          rec.excluded = excluded;
-          store.put(rec);
-        };
-        tx.oncomplete = () => resolve(true);
         tx.onerror = () => reject(tx.error);
       });
     });
@@ -106,10 +84,7 @@ export class KomaStorage {
     const frames = records.map((r, idx) => ({
       id: r.id,
       blob: r.blob,
-      thumbUrl: URL.createObjectURL(r.thumbBlob || r.blob),
-      motion: typeof r.motion === 'number' ? r.motion : 10,
-      elapsedMs: typeof r.elapsedMs === 'number' ? r.elapsedMs : idx * 10000,
-      excluded: Boolean(r.excluded)
+      elapsedMs: typeof r.elapsedMs === 'number' ? r.elapsedMs : idx * 10000
     }));
     return { meta, frames };
   }

@@ -5,34 +5,19 @@ const storage = new KomaStorage();
 const RATIOS = { '16:9': [16, 9], '9:16': [9, 16], '4:3': [4, 3], '1:1': [1, 1] };
 
 // ===== State =====
-let stream = null, facingMode = 'environment', wakeLock = null;
-let selectedRatio = '16:9', W = 854, H = 480;
+let previewStream = null;
+let facingMode = 'environment';
+let wakeLock = null;
+let selectedRatio = '9:16', W = 480, H = 854;
 let isRecording = false, isPaused = false, isCapturing = false;
-let elapsedMs = 0, lastTick = 0, nextShotTime = 0, worker = null;
+let elapsedMs = 0, lastTick = 0, nextShotTime = 0, worker = null, workerUrl = null;
 
-let frames = [], currentIdx = 0, isPlaying = false, playRaf = null, lastPlayStep = 0, playTimeMs = 0;
-let renderSeq = 0;
-let isDragging = false, dragTargetExclude = true, prevDiffData = null;
+let frames = [];
+let droppedStillCount = 0;
+let prevDiffData = null;
+let lastShotUrl = null;
 
-// Overlay GIF / Stamp & Edit State (プレビューとMP4出力で完全共有)
-let overlayGifFrames = [], overlayStaticImg = null, overlayTotalMs = 0;
-const editState = {
-  gifPos: 'br',      // br | bl | tr | tl
-  gifSizePct: 18,    // 画面幅に対する%
-  gifOpacity: 1.0,
-  gifMarginPct: 3,
-  stampPreset: 'none', // none | study | focus | rec
-  brightness: 100,
-  contrast: 100,
-  saturate: 100,
-  sepia: 0,
-  rotateDeg: 0,
-  flipH: false,
-  showTimer: false,
-  watermark: ''
-};
-
-// ===== Canvases & PiP =====
+// ===== Offscreen Canvases =====
 const makeCanvas = (w = 0, h = 0, opt) => {
   const c = document.createElement('canvas');
   if (w) c.width = w;
@@ -40,14 +25,7 @@ const makeCanvas = (w = 0, h = 0, opt) => {
   return [c, c.getContext('2d', opt)];
 };
 const [capCanvas, capCtx] = makeCanvas();
-const [thumbCanvas, thumbCtx] = makeCanvas();
 const [diffCanvas, diffCtx] = makeCanvas(64, 36, { willReadFrequently: true });
-const [pipCanvas, pipCtx] = makeCanvas(480, 270);
-const pipVideo = Object.assign(document.createElement('video'), { muted: true, playsInline: true });
-let pipTimer = null;
-
-const editorCanvas = $('editorCanvas');
-const editorCtx = editorCanvas.getContext('2d');
 
 // ===== Helpers =====
 const setBadge = (cls, text) => {
@@ -63,14 +41,8 @@ const formatTime = (ms) => {
   return h > 0 ? `${h}:${m}:${sec}` : `${m}:${sec}`;
 };
 
-function revokeFrameUrls() {
-  for (const f of frames) {
-    if (f.thumbUrl) URL.revokeObjectURL(f.thumbUrl);
-  }
-}
-
 function getFps() {
-  return Number($('exportFpsSelect')?.value || $('fpsSelect').value || 15);
+  return Number($('fpsSelect').value || 15);
 }
 
 function updateStats() {
@@ -78,52 +50,44 @@ function updateStats() {
   $('frameCount').innerHTML = `${frames.length}<span>枚</span>`;
   $('elapsed').textContent = formatTime(elapsedMs);
   $('estDuration').innerHTML = `${(frames.length / fps).toFixed(1)}<span>秒</span>`;
+  $('droppedCount').innerHTML = `${droppedStillCount}<span>枚</span>`;
   $('psStats').textContent = `${frames.length}枚 ・ ${formatTime(elapsedMs)}`;
+  $('exportWebmBtn').textContent = `⬇ WebM書き出し (${frames.length}枚)`;
+  $('exportWebmBtn').disabled = isRecording || frames.length < 2;
 }
 
 // ===== UI: Sidebar, Tabs, Theme =====
 $('sidebarToggleBtn').onclick = () => $('appShell').classList.toggle('sidebar-collapsed');
 
-function switchTab(tab) {
-  document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${tab}`));
-  if (tab === 'edit') renderEditor();
-  else stopPreview();
-}
-document.querySelectorAll('.nav-item').forEach(el => el.onclick = () => switchTab(el.dataset.tab));
-$('openBlueprintBtn').onclick = () => switchTab('blueprint');
-$('blueprintGoRecordBtn').onclick = () => switchTab('record');
+document.querySelectorAll('.nav-item').forEach(el => {
+  el.onclick = () => {
+    const tab = el.dataset.tab;
+    document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b === el));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${tab}`));
+  };
+});
 
 function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
   $('themeBtn').textContent = t === 'light' ? '☀️ ライト' : '🌙 ダーク';
   localStorage.setItem('komaclip_theme', t);
 }
-applyTheme(localStorage.getItem('komaclip_theme') || 'light');
+applyTheme(localStorage.getItem('komaclip_theme') || 'dark');
 $('themeBtn').onclick = () => applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
 
-// ===== Ratio, Dimensions & PiP Sync =====
+// ===== Ratio & Dimensions =====
 function calcOutputSize() {
   const base = Number($('resSelect').value);
-  const [rw, rh] = RATIOS[selectedRatio] || [16, 9];
+  const [rw, rh] = RATIOS[selectedRatio] || [9, 16];
   W = Math.max(2, (rw >= rh ? base : Math.round(base * (rw / rh))) & ~1);
   H = Math.max(2, (rw >= rh ? Math.round(base * (rh / rw)) : base) & ~1);
-
   capCanvas.width = W;
   capCanvas.height = H;
-  thumbCanvas.width = 160;
-  thumbCanvas.height = Math.max(40, Math.round(160 * (H / W)));
-
   document.documentElement.style.setProperty('--stage-ar', String(rw / rh));
-
-  const scale = 480 / Math.max(W, H);
-  pipCanvas.width = Math.max(2, Math.round(W * scale) & ~1);
-  pipCanvas.height = Math.max(2, Math.round(H * scale) & ~1);
-  if (document.pictureInPictureElement === pipVideo) refreshPipStream();
 }
 
 function setRatio(ratio) {
-  selectedRatio = RATIOS[ratio] ? ratio : '16:9';
+  selectedRatio = RATIOS[ratio] ? ratio : '9:16';
   $('ratioGroup').querySelectorAll('.ratio-btn').forEach(b => b.classList.toggle('active', b.dataset.ratio === selectedRatio));
   calcOutputSize();
   renderGuide();
@@ -134,30 +98,17 @@ $('resSelect').onchange = () => {
   calcOutputSize();
   $('hint').textContent = `出力解像度を ${W}×${H} (${selectedRatio}) に変更しました`;
 };
+$('fpsSelect').onchange = updateStats;
 
-$('fpsSelect').onchange = () => {
-  $('exportFpsSelect').value = $('fpsSelect').value;
-  updateStats();
-  updateEditorStats();
-};
-$('exportFpsSelect').onchange = () => {
-  $('fpsSelect').value = $('exportFpsSelect').value;
-  updateStats();
-  updateEditorStats();
-};
-
-$('ratioGroup').addEventListener('click', async (e) => {
+$('ratioGroup').addEventListener('click', (e) => {
   const btn = e.target.closest('.ratio-btn');
   if (!btn || isRecording) return;
   setRatio(btn.dataset.ratio);
-  if (document.pictureInPictureElement === pipVideo) {
-    try {
-      await document.exitPictureInPicture();
-      await refreshPipStream();
-      await pipVideo.requestPictureInPicture();
-    } catch {}
-  }
 });
+
+$('stillThreshold').oninput = () => {
+  $('stillThVal').textContent = `感度 ${Number($('stillThreshold').value).toFixed(1)}`;
+};
 
 // ===== Guides =====
 const GUIDE_SVGS = {
@@ -178,97 +129,209 @@ $('toggleGuideBtn').onclick = () => {
 calcOutputSize();
 renderGuide();
 
-// ===== Camera Connect =====
-async function connectCamera() {
+// ===== Camera Control (On-Demand Start & Immediate Stop) =====
+function stopPreviewStream() {
+  if (previewStream) {
+    previewStream.getTracks().forEach(t => t.stop());
+    previewStream = null;
+  }
+  const preview = $('preview');
+  preview.srcObject = null;
+  $('connectCamBtn').textContent = '📷 構図確認（カメラON）';
+}
+
+async function openCameraStream() {
   if (!navigator.mediaDevices?.getUserMedia) {
-    setBadge('', '未対応');
-    $('hint').textContent = 'このブラウザまたは非HTTPS環境ではカメラAPIを利用できません（HTTPS または localhost で開いてください）';
+    throw new Error('このブラウザまたは非HTTPS環境ではカメラAPIを利用できません');
+  }
+  const base = Number($('resSelect').value || 854);
+  const idealW = base >= 1920 ? 1920 : 1280;
+  const idealH = base >= 1920 ? 1080 : 720;
+  return navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: { ideal: facingMode },
+      width: { ideal: idealW },
+      height: { ideal: idealH },
+      frameRate: { ideal: 30 }
+    },
+    audio: false
+  });
+}
+
+async function waitVideoReady(videoEl, timeoutMs = 3000) {
+  const start = performance.now();
+  while (videoEl.readyState < 2 || !videoEl.videoWidth || !videoEl.videoHeight) {
+    if (performance.now() - start > timeoutMs) {
+      throw new Error('カメラ映像の初期化がタイムアウトしました');
+    }
+    await new Promise(r => setTimeout(r, 50));
+  }
+}
+
+// 構図確認用の手動ON/OFF（録画開始時は自動でOFFにして発熱防止）
+async function togglePreviewCamera() {
+  if (isRecording) return;
+  if (previewStream) {
+    stopPreviewStream();
+    setBadge('', 'カメラ停止中');
+    $('hint').textContent = '構図確認カメラを停止しました（発熱・電力消費ゼロ）';
     return;
   }
-  if (stream) {
-    stream.getTracks().forEach(t => t.stop());
-    stream = null;
-    await new Promise(r => setTimeout(r, 150));
-  }
-  calcOutputSize();
-  $('hint').textContent = 'カメラへ接続中...';
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: facingMode }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
-      audio: false
-    });
+    $('hint').textContent = '構図確認のためカメラを起動中...';
+    previewStream = await openCameraStream();
     const preview = $('preview');
-    preview.srcObject = stream;
+    preview.srcObject = previewStream;
     await preview.play();
-    const { width = 0, height = 0 } = stream.getVideoTracks()[0]?.getSettings() || {};
+    await waitVideoReady(preview);
+    $('lastShotImg').style.display = 'none';
     $('placeholder').style.display = 'none';
-    $('startBtn').disabled = $('switchCamBtn').disabled = $('pipBtn').disabled = false;
-    setBadge('', '接続済み');
-    $('hint').textContent = `接続完了（入力 ${width}×${height} → 出力 ${W}×${H} / ${selectedRatio}）`;
+    $('camSleepBadge').style.display = 'none';
+    $('connectCamBtn').textContent = '⏹ 構図確認を終了（カメラOFF）';
+    setBadge('', '構図確認中');
+    $('hint').textContent = '画角を確認したら「間欠録画スタート」を押してください（自動で間欠駆動に切り替わります）';
   } catch (e) {
+    stopPreviewStream();
     setBadge('', 'エラー');
     $('hint').textContent = 'カメラ接続失敗: ' + e.message;
   }
 }
-$('connectCamBtn').onclick = $('heroCamBtn').onclick = connectCamera;
-$('switchCamBtn').onclick = () => {
+$('connectCamBtn').onclick = $('heroCamBtn').onclick = togglePreviewCamera;
+$('switchCamBtn').onclick = async () => {
+  if (isRecording) return;
   facingMode = facingMode === 'environment' ? 'user' : 'environment';
-  connectCamera();
+  if (previewStream) {
+    stopPreviewStream();
+    await togglePreviewCamera();
+  } else {
+    $('hint').textContent = `使用カメラを ${facingMode === 'environment' ? '背面/外付け' : '前面'} に切り替えました`;
+  }
 };
 
-// ===== PiP & Power Save =====
-function drawCroppedTo(ctx, dstW, dstH) {
-  const v = $('preview'), vw = v.videoWidth, vh = v.videoHeight;
-  if (!vw || !vh) return;
+// ===== Crop & Motion Detection =====
+function drawCroppedTo(videoEl, ctx, dstW, dstH) {
+  const vw = videoEl.videoWidth, vh = videoEl.videoHeight;
+  if (!vw || !vh) return false;
   const srcR = vw / vh, dstR = dstW / dstH;
   let sx = 0, sy = 0, sw = vw, sh = vh;
   if (srcR > dstR) { sw = vh * dstR; sx = (vw - sw) / 2; }
   else { sh = vw / dstR; sy = (vh - sh) / 2; }
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(v, sx, sy, sw, sh, 0, 0, dstW, dstH);
+  ctx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, dstW, dstH);
+  return true;
 }
 
-async function refreshPipStream() {
-  drawCroppedTo(pipCtx, pipCanvas.width, pipCanvas.height);
-  if (pipVideo.srcObject) pipVideo.srcObject.getTracks().forEach(t => t.stop());
-  pipVideo.srcObject = pipCanvas.captureStream(15);
-  await pipVideo.play();
-}
-
-function stopPip() {
-  clearInterval(pipTimer);
-  pipTimer = null;
-  if (pipVideo.srcObject) {
-    pipVideo.srcObject.getTracks().forEach(t => t.stop());
-    pipVideo.srcObject = null;
+function evaluateMotion(videoEl) {
+  if (!drawCroppedTo(videoEl, diffCtx, 64, 36)) {
+    return { score: 100, snapshot: null };
   }
+  const cur = diffCtx.getImageData(0, 0, 64, 36).data;
+  if (!prevDiffData) {
+    return { score: 100, snapshot: new Uint8ClampedArray(cur) };
+  }
+  let sum = 0;
+  for (let i = 0; i < cur.length; i += 4) {
+    const y1 = (cur[i] * 77 + cur[i + 1] * 150 + cur[i + 2] * 29) >> 8;
+    const y2 = (prevDiffData[i] * 77 + prevDiffData[i + 1] * 150 + prevDiffData[i + 2] * 29) >> 8;
+    sum += Math.abs(y1 - y2);
+  }
+  return { score: sum / (64 * 36), snapshot: new Uint8ClampedArray(cur) };
 }
-pipVideo.addEventListener('leavepictureinpicture', stopPip);
 
-$('pipBtn').onclick = async () => {
+// ===== One-Shot Capture (Start Camera -> Capture -> Stop Camera Immediately) =====
+async function captureOneShotBurst() {
+  if (isCapturing || !isRecording) return;
+  isCapturing = true;
+
+  let tempStream = null;
+  const tempVideo = document.createElement('video');
+  tempVideo.muted = true;
+  tempVideo.playsInline = true;
+
   try {
-    if (document.pictureInPictureElement) {
-      await document.exitPictureInPicture();
-      stopPip();
-    } else if (stream) {
-      calcOutputSize();
-      await refreshPipStream();
-      clearInterval(pipTimer);
-      pipTimer = setInterval(() => {
-        if (stream) drawCroppedTo(pipCtx, pipCanvas.width, pipCanvas.height);
-      }, 1000 / 15);
-      await pipVideo.requestPictureInPicture();
+    $('camSleepBadge').textContent = '📸 カメラ起動・撮影中...';
+    $('camSleepBadge').style.display = 'block';
+
+    tempStream = await openCameraStream();
+    tempVideo.srcObject = tempStream;
+    await tempVideo.play();
+    await waitVideoReady(tempVideo);
+
+    // オート露出・ホワイトバランス安定待ち
+    const warmupMs = Number($('warmupMsSelect')?.value || 600);
+    await new Promise(r => setTimeout(r, warmupMs));
+
+    // 待機中に録画終了された場合は保存せず即座に抜ける
+    if (!isRecording) return;
+
+    const { score, snapshot } = evaluateMotion(tempVideo);
+    if (!snapshot) return;
+
+    const autoDrop = $('autoDropStillCheck').checked;
+    const threshold = Number($('stillThreshold').value);
+
+    // 2枚目以降で動きが閾値未満なら「止まっている画像」として即破棄（基準画像 prevDiffData は更新しない）
+    if (autoDrop && prevDiffData && score < threshold) {
+      droppedStillCount++;
+      updateStats();
+      $('hint').textContent = `🟠 静止画像を検知して破棄しました（動き差分: ${score.toFixed(2)} < ${threshold}）`;
+      return;
+    }
+
+    if (!drawCroppedTo(tempVideo, capCtx, W, H)) return;
+    prevDiffData = snapshot;
+
+    const blob = await new Promise(r => capCanvas.toBlob(r, 'image/jpeg', 0.90));
+    if (!blob) return;
+
+    const frameElapsed = elapsedMs;
+    let id = null;
+    try {
+      id = await storage.addFrame({ blob, elapsedMs: frameElapsed });
+      await storage.saveMeta({ W, H, selectedRatio, elapsedMs: frameElapsed });
+      $('dbStatus').textContent = `DB保存済 (${frames.length + 1}枚)`;
+    } catch {
+      $('dbStatus').textContent = 'メモリ保存中';
+    }
+
+    frames.push({ id, blob, elapsedMs: frameElapsed });
+
+    if (lastShotUrl) URL.revokeObjectURL(lastShotUrl);
+    lastShotUrl = URL.createObjectURL(blob);
+    const imgEl = $('lastShotImg');
+    imgEl.src = lastShotUrl;
+    imgEl.style.display = 'block';
+    $('placeholder').style.display = 'none';
+
+    updateStats();
+    $('hint').textContent = `✅ コマ #${frames.length} 保存完了（動き差分: ${score.toFixed(1)}）→ カメラ即停止`;
+
+    if (!$('powerSaveOverlay').classList.contains('active')) {
+      const fl = $('flash');
+      fl.classList.remove('fire');
+      void fl.offsetWidth;
+      fl.classList.add('fire');
     }
   } catch (e) {
-    $('hint').textContent = 'PiP未対応または許可されていません: ' + e.message;
+    $('hint').textContent = '撮影エラー: ' + e.message;
+  } finally {
+    // 撮影が終わったら必ず即座にトラックを停止してカメラをオフにする
+    if (tempStream) {
+      tempStream.getTracks().forEach(t => t.stop());
+    }
+    tempVideo.srcObject = null;
+    if (isRecording) {
+      $('camSleepBadge').textContent = '💤 カメラ停止中（次の撮影まで待機）';
+      $('camSleepBadge').style.display = 'block';
+    } else {
+      $('camSleepBadge').style.display = 'none';
+    }
+    isCapturing = false;
   }
-};
-$('powerSaveBtn').onclick = () => $('powerSaveOverlay').classList.add('active');
-$('psExitBtn').onclick = $('powerSaveOverlay').ondblclick = () => $('powerSaveOverlay').classList.remove('active');
+}
 
-// ===== Worker Timer & Capture =====
-let workerUrl = null;
+// ===== Worker Timer =====
 function stopWorkerTimer() {
   if (worker) { worker.terminate(); worker = null; }
   if (workerUrl) { URL.revokeObjectURL(workerUrl); workerUrl = null; }
@@ -276,7 +339,7 @@ function stopWorkerTimer() {
 
 function startWorkerTimer() {
   stopWorkerTimer();
-  workerUrl = URL.createObjectURL(new Blob([`setInterval(() => postMessage(0), 200);`], { type: 'application/javascript' }));
+  workerUrl = URL.createObjectURL(new Blob([`setInterval(() => postMessage(0), 250);`], { type: 'application/javascript' }));
   worker = new Worker(workerUrl);
   worker.onmessage = async () => {
     if (!isRecording || isPaused) return;
@@ -288,80 +351,27 @@ function startWorkerTimer() {
     const interval = Number($('intervalSelect').value);
     const remain = Math.max(0, nextShotTime - now);
     $('nextShotBar').style.width = Math.min(100, ((interval - remain) / interval) * 100) + '%';
+
     if (now >= nextShotTime && !isCapturing) {
       nextShotTime = now + interval;
-      await captureFrame();
+      await captureOneShotBurst();
     }
   };
 }
 
-function calcMotion() {
-  drawCroppedTo(diffCtx, 64, 36);
-  const cur = diffCtx.getImageData(0, 0, 64, 36).data;
-  if (!prevDiffData) { prevDiffData = new Uint8ClampedArray(cur); return 100; }
-  let sum = 0;
-  for (let i = 0; i < cur.length; i += 4) {
-    sum += Math.abs(cur[i] - prevDiffData[i]) + Math.abs(cur[i + 1] - prevDiffData[i + 1]) + Math.abs(cur[i + 2] - prevDiffData[i + 2]);
-  }
-  prevDiffData.set(cur);
-  return sum / (64 * 36 * 3);
-}
-
-async function captureFrame() {
-  if (!stream || isCapturing) return;
-  isCapturing = true;
-  try {
-    const motion = calcMotion();
-    drawCroppedTo(capCtx, W, H);
-    drawCroppedTo(thumbCtx, thumbCanvas.width, thumbCanvas.height);
-
-    const [blob, thumbBlob] = await Promise.all([
-      new Promise(r => capCanvas.toBlob(r, 'image/jpeg', 0.92)),
-      new Promise(r => thumbCanvas.toBlob(r, 'image/jpeg', 0.7))
-    ]);
-    if (!blob) return;
-
-    const frameElapsed = elapsedMs;
-    let id = null;
-    try {
-      id = await storage.addFrame({ blob, thumbBlob: thumbBlob || blob, motion, elapsedMs: frameElapsed, excluded: false });
-      await storage.saveMeta({ W, H, selectedRatio, elapsedMs: frameElapsed });
-      $('dbStatus').textContent = `保存済 (${frames.length + 1})`;
-    } catch {
-      $('dbStatus').textContent = 'メモリのみ';
-    }
-
-    frames.push({
-      id,
-      blob,
-      thumbUrl: URL.createObjectURL(thumbBlob || blob),
-      motion,
-      elapsedMs: frameElapsed,
-      excluded: false
-    });
-    updateStats();
-    if (frames.length >= 2) $('finishBtn').disabled = false;
-
-    if (!$('powerSaveOverlay').classList.contains('active')) {
-      const fl = $('flash');
-      fl.classList.remove('fire');
-      void fl.offsetWidth;
-      fl.classList.add('fire');
-    }
-  } finally {
-    isCapturing = false;
-  }
-}
-
-// ===== Recording Controls & Demo =====
+// ===== Recording Controls =====
 $('startBtn').onclick = async () => {
-  if (!stream) return;
+  stopPreviewStream();
+
   try { await storage.clearAll(); } catch {}
-  revokeFrameUrls();
   calcOutputSize();
   try { await storage.saveMeta({ W, H, selectedRatio, elapsedMs: 0 }); } catch {}
 
+  if (lastShotUrl) { URL.revokeObjectURL(lastShotUrl); lastShotUrl = null; }
+  $('lastShotImg').style.display = 'none';
+
   frames = [];
+  droppedStillCount = 0;
   prevDiffData = null;
   elapsedMs = 0;
   isRecording = true;
@@ -369,13 +379,18 @@ $('startBtn').onclick = async () => {
   lastTick = Date.now();
   nextShotTime = lastTick + Number($('intervalSelect').value);
 
-  $('startBtn').disabled = $('finishBtn').disabled = $('resSelect').disabled = true;
-  $('pauseBtn').disabled = false;
-  setBadge('recording', '録画中');
+  $('startBtn').disabled = $('resSelect').disabled = $('connectCamBtn').disabled = $('switchCamBtn').disabled = true;
+  $('pauseBtn').disabled = $('stopRecBtn').disabled = false;
+  $('exportCard').style.display = 'none';
+  $('downloadLinks').innerHTML = '';
+  setBadge('recording', '間欠録画中');
+  updateStats();
+
   if ('wakeLock' in navigator) {
     try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
   }
-  await captureFrame();
+
+  await captureOneShotBurst();
   startWorkerTimer();
 };
 
@@ -383,540 +398,38 @@ $('pauseBtn').onclick = () => {
   if (!isRecording) return;
   isPaused = !isPaused;
   $('pauseBtn').textContent = isPaused ? '▶ 再開' : '⏸ 一時停止';
-  setBadge(isPaused ? 'paused' : 'recording', isPaused ? '一時停止' : '録画中');
+  setBadge(isPaused ? 'paused' : 'recording', isPaused ? '一時停止' : '間欠録画中');
   if (!isPaused) {
     lastTick = Date.now();
     nextShotTime = lastTick + Number($('intervalSelect').value);
   }
 };
 
-$('finishBtn').onclick = () => {
+$('stopRecBtn').onclick = () => {
   isRecording = isPaused = false;
   stopWorkerTimer();
   $('nextShotBar').style.width = '0%';
+  $('camSleepBadge').style.display = 'none';
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
-  $('startBtn').disabled = $('resSelect').disabled = false;
-  $('pauseBtn').disabled = true;
+
+  $('startBtn').disabled = $('resSelect').disabled = $('connectCamBtn').disabled = $('switchCamBtn').disabled = false;
+  $('pauseBtn').disabled = $('stopRecBtn').disabled = true;
   $('pauseBtn').textContent = '⏸ 一時停止';
-  setBadge('done', '編集モード');
-  switchTab('edit');
-};
-
-async function loadDemoFrames() {
-  stopPreview();
-  calcOutputSize();
-  try { await storage.clearAll(); } catch {}
-  revokeFrameUrls();
-  frames = [];
-  const [c, ctx] = makeCanvas(W, H);
-  for (let i = 0; i < 30; i++) {
-    const isStill = i >= 11 && i <= 15;
-    // 机・ノート風の勉強デモ画を描画
-    ctx.fillStyle = '#1e2436';
-    ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = isStill ? '#3b2d1b' : '#2a3554';
-    ctx.fillRect(W * 0.08, H * 0.08, W * 0.84, H * 0.84);
-
-    // ノート
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(W * 0.2, H * 0.18, W * 0.6, H * 0.64);
-    ctx.strokeStyle = '#cbd5e1';
-    ctx.lineWidth = 2;
-    for (let line = 1; line <= 6; line++) {
-      const ly = H * 0.18 + (H * 0.64 / 7) * line;
-      ctx.beginPath();
-      ctx.moveTo(W * 0.23, ly);
-      ctx.lineTo(W * 0.77, ly);
-      ctx.stroke();
-    }
-    // 進捗バー的なメモ線
-    ctx.fillStyle = isStill ? '#f59e0b' : '#4f6ef7';
-    const prog = Math.min(1, (i + 1) / 30);
-    ctx.fillRect(W * 0.23, H * 0.25, W * 0.54 * prog, H * 0.05);
-
-    ctx.fillStyle = '#1e293b';
-    ctx.font = `bold ${Math.round(Math.min(W, H) * 0.07)}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText(isStill ? `離席中 #${i + 1}` : `勉強中 #${i + 1}`, W / 2, H * 0.56);
-
-    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
-    const motion = isStill ? 1.2 : 18.0;
-    const frameElapsed = i * 10000;
-    let id = null;
-    try {
-      id = await storage.addFrame({ blob, thumbBlob: blob, motion, elapsedMs: frameElapsed, excluded: false });
-    } catch {}
-    frames.push({ id, blob, thumbUrl: URL.createObjectURL(blob), motion, elapsedMs: frameElapsed, excluded: false });
-  }
-  elapsedMs = 30 * 10000;
-  try { await storage.saveMeta({ W, H, selectedRatio, elapsedMs }); } catch {}
+  setBadge('done', '撮影完了');
   updateStats();
-  setBadge('done', 'デモ読込済');
-  switchTab('edit');
-}
-$('demoBtn').onclick = $('editDemoBtn').onclick = loadDemoFrames;
 
-// ===== Composite Renderer (プレビュー・MP4出力で完全共通) =====
-function buildFilterString() {
-  const parts = [
-    `brightness(${editState.brightness}%)`,
-    `contrast(${editState.contrast}%)`,
-    `saturate(${editState.saturate}%)`
-  ];
-  if (editState.sepia > 0) parts.push(`sepia(${editState.sepia}%)`);
-  return parts.join(' ');
-}
-
-function drawRoundedRect(ctx, x, y, w, h, r) {
-  const rad = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + rad, y);
-  ctx.arcTo(x + w, y, x + w, y + h, rad);
-  ctx.arcTo(x + w, y + h, x, y + h, rad);
-  ctx.arcTo(x, y + h, x, y, rad);
-  ctx.arcTo(x, y, x + w, y, rad);
-  ctx.closePath();
-}
-
-function drawBuiltInStamp(ctx, cw, ch, timeMs) {
-  if (editState.stampPreset === 'none') return;
-  const labels = {
-    study: { text: '🔥 勉強中', bg: 'rgba(79, 110, 247, 0.88)' },
-    focus: { text: '✨ 集中モード', bg: 'rgba(16, 185, 129, 0.88)' },
-    rec: { text: '● STUDY REC', bg: 'rgba(239, 68, 68, 0.88)' }
-  };
-  const cfg = labels[editState.stampPreset];
-  if (!cfg) return;
-
-  const pulse = 1 + Math.sin(timeMs / 240) * 0.04;
-  const dw = Math.round(cw * (editState.gifSizePct / 100) * 1.15);
-  const dh = Math.round(dw * 0.36);
-  const padX = Math.round(cw * (editState.gifMarginPct / 100));
-  const padY = Math.round(ch * (editState.gifMarginPct / 100));
-
-  let x = cw - dw - padX, y = ch - dh - padY;
-  if (editState.gifPos === 'bl') { x = padX; y = ch - dh - padY; }
-  else if (editState.gifPos === 'tr') { x = cw - dw - padX; y = padY; }
-  else if (editState.gifPos === 'tl') { x = padX; y = padY; }
-
-  ctx.save();
-  ctx.globalAlpha = editState.gifOpacity;
-  ctx.translate(x + dw / 2, y + dh / 2);
-  ctx.scale(pulse, pulse);
-  drawRoundedRect(ctx, -dw / 2, -dh / 2, dw, dh, dh / 2);
-  ctx.fillStyle = cfg.bg;
-  ctx.fill();
-  ctx.fillStyle = '#ffffff';
-  ctx.font = `800 ${Math.max(12, Math.round(dh * 0.44))}px -apple-system, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(cfg.text, 0, 1);
-  ctx.restore();
-}
-
-function drawCornerOverlay(ctx, cw, ch, timeMs) {
-  // ユーザーアップロードGIF優先、なければ内蔵スタンプ
-  let img = overlayStaticImg;
-  if (overlayGifFrames.length && overlayTotalMs > 0) {
-    let t = ((timeMs % overlayTotalMs) + overlayTotalMs) % overlayTotalMs;
-    img = overlayGifFrames.find(f => (t -= f.durationMs) <= 0)?.bitmap || overlayGifFrames[0].bitmap;
-  }
-  if (!img) {
-    drawBuiltInStamp(ctx, cw, ch, timeMs);
-    return;
-  }
-
-  const dw = Math.round(cw * (editState.gifSizePct / 100));
-  const dh = Math.max(2, Math.round(dw * (img.height / img.width)));
-  const padX = Math.round(cw * (editState.gifMarginPct / 100));
-  const padY = Math.round(ch * (editState.gifMarginPct / 100));
-
-  let x = cw - dw - padX, y = ch - dh - padY;
-  if (editState.gifPos === 'bl') { x = padX; y = ch - dh - padY; }
-  else if (editState.gifPos === 'tr') { x = cw - dw - padX; y = padY; }
-  else if (editState.gifPos === 'tl') { x = padX; y = padY; }
-
-  ctx.save();
-  ctx.globalAlpha = editState.gifOpacity;
-  drawRoundedRect(ctx, x, y, dw, dh, Math.round(dw * 0.08));
-  ctx.clip();
-  ctx.drawImage(img, x, y, dw, dh);
-  ctx.restore();
-}
-
-function drawTextAndTimer(ctx, cw, ch, frameElapsedMs) {
-  const pad = Math.round(cw * 0.025);
-  const fontSize = Math.max(14, Math.round(Math.min(cw, ch) * 0.042));
-
-  if (editState.showTimer) {
-    const label = `⏱ ${formatTime(frameElapsedMs)}`;
-    ctx.save();
-    ctx.font = `700 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-    const tw = ctx.measureText(label).width;
-    const boxW = tw + fontSize * 1.1;
-    const boxH = fontSize * 1.65;
-    drawRoundedRect(ctx, pad, pad, boxW, boxH, boxH / 2);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
-    ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, pad + fontSize * 0.55, pad + boxH / 2 + 1);
-    ctx.restore();
-  }
-
-  const wm = editState.watermark.trim();
-  if (wm) {
-    ctx.save();
-    ctx.font = `700 ${Math.round(fontSize * 0.88)}px -apple-system, BlinkMacSystemFont, "Noto Sans JP", sans-serif`;
-    const tw = ctx.measureText(wm).width;
-    const boxW = tw + fontSize * 1.0;
-    const boxH = fontSize * 1.5;
-    const y = ch - boxH - pad;
-    drawRoundedRect(ctx, pad, y, boxW, boxH, 10);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
-    ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(wm, pad + fontSize * 0.5, y + boxH / 2 + 1);
-    ctx.restore();
-  }
-}
-
-function drawCompositeFrame(ctx, bmp, cw, ch, timeMs, frameElapsedMs) {
-  ctx.save();
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, cw, ch);
-
-  ctx.filter = buildFilterString();
-  ctx.translate(cw / 2, ch / 2);
-  if (editState.flipH) ctx.scale(-1, 1);
-  if (editState.rotateDeg) ctx.rotate((editState.rotateDeg * Math.PI) / 180);
-
-  // 90°/270°回転時はアスペクトを保って枠に収める
-  if (editState.rotateDeg % 180 !== 0) {
-    const scale = Math.min(cw / ch, ch / cw);
-    ctx.drawImage(bmp, -(cw * scale) / 2, -(ch * scale) / 2, cw * scale, ch * scale);
+  if (frames.length >= 2) {
+    $('exportCard').style.display = 'grid';
+    $('hint').textContent = `撮影終了（採用 ${frames.length}枚 / 静止破棄 ${droppedStillCount}枚）。「WebM書き出し」で出力できます。`;
   } else {
-    ctx.drawImage(bmp, -cw / 2, -ch / 2, cw, ch);
+    $('hint').textContent = '採用コマが2枚未満のため動画化できません。';
   }
-  ctx.restore();
-
-  drawTextAndTimer(ctx, cw, ch, frameElapsedMs);
-  drawCornerOverlay(ctx, cw, ch, timeMs);
-}
-
-// ===== Editor =====
-const getActiveIndices = () => frames.map((f, i) => f.excluded ? -1 : i).filter(i => i >= 0);
-
-function renderEditor() {
-  editorCanvas.width = W;
-  editorCanvas.height = H;
-  const grid = $('gridWrap');
-  grid.innerHTML = '';
-
-  const hasFrames = frames.length > 0;
-  $('editEmptyState').classList.toggle('hidden', hasFrames);
-  if (!hasFrames) {
-    editorCtx.clearRect(0, 0, W, H);
-    $('currentFrameInfo').textContent = '#0 / 0';
-    $('editorStats').textContent = 'フレームがありません（録画するかデモを読込んでください）';
-    $('stillCountLabel').textContent = '0枚';
-    return;
-  }
-
-  const frag = document.createDocumentFragment();
-  frames.forEach((f, idx) => {
-    const el = document.createElement('div');
-    el.className = 'grid-item' + (f.excluded ? ' excluded' : '');
-    el.dataset.idx = idx;
-    el.innerHTML = `<img src="${f.thumbUrl}" alt=""><span class="num">#${idx + 1}</span>`;
-    frag.appendChild(el);
-  });
-  grid.appendChild(frag);
-  updateStillHighlight();
-  showFrame(Math.min(currentIdx, frames.length - 1));
-  updateEditorStats();
-}
-
-function applyExclude(idx, state) {
-  if (!frames[idx] || frames[idx].excluded === state) return;
-  frames[idx].excluded = state;
-  $('gridWrap').children[idx]?.classList.toggle('excluded', state);
-  if (frames[idx].id != null) {
-    storage.setExcluded(frames[idx].id, state).catch(() => {});
-  }
-  updateEditorStats();
-}
-
-// Sub-tabs inside Editor
-$('editToolTabs').addEventListener('click', (e) => {
-  const btn = e.target.closest('.subtab-btn');
-  if (!btn) return;
-  $('editToolTabs').querySelectorAll('.subtab-btn').forEach(b => b.classList.toggle('active', b === btn));
-  document.querySelectorAll('.tool-panel').forEach(p => p.classList.toggle('active', p.id === `tool-${btn.dataset.tool}`));
-});
-
-$('gridSizeGroup').addEventListener('click', (e) => {
-  const btn = e.target.closest('.ratio-btn');
-  if (!btn) return;
-  $('gridSizeGroup').querySelectorAll('.ratio-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  $('gridWrap').classList.remove('size-sm', 'size-md', 'size-lg');
-  $('gridWrap').classList.add('size-' + btn.dataset.size);
-});
-$('touchDragCheck').onchange = () => $('gridWrap').classList.toggle('drag-touch', $('touchDragCheck').checked);
-
-$('gridWrap').addEventListener('pointerdown', (e) => {
-  const item = e.target.closest('.grid-item');
-  if (!item) return;
-  const idx = Number(item.dataset.idx);
-  if (e.pointerType === 'touch' && !$('touchDragCheck').checked) {
-    stopPreview(); showFrame(idx); applyExclude(idx, !frames[idx].excluded);
-    return;
-  }
-  e.preventDefault();
-  stopPreview();
-  isDragging = true;
-  dragTargetExclude = !frames[idx].excluded;
-  showFrame(idx);
-  applyExclude(idx, dragTargetExclude);
-});
-window.addEventListener('pointermove', (e) => {
-  if (!isDragging) return;
-  const item = document.elementFromPoint(e.clientX, e.clientY)?.closest('.grid-item');
-  if (item) {
-    const idx = Number(item.dataset.idx);
-    showFrame(idx);
-    applyExclude(idx, dragTargetExclude);
-  }
-});
-window.addEventListener('pointerup', () => { isDragging = false; });
-
-$('cutBeforeBtn').onclick = () => { for (let i = 0; i < currentIdx; i++) applyExclude(i, true); };
-$('cutAfterBtn').onclick = () => { for (let i = currentIdx + 1; i < frames.length; i++) applyExclude(i, true); };
-$('thinFramesBtn').onclick = () => {
-  const active = getActiveIndices();
-  if (active.length < 4) return;
-  active.forEach((frameIdx, order) => {
-    if (order % 2 === 1) applyExclude(frameIdx, true);
-  });
 };
 
-function updateStillHighlight() {
-  const th = Number($('stillThreshold').value);
-  let cnt = 0;
-  frames.forEach((f, i) => {
-    const isStill = f.motion < th;
-    if (isStill) cnt++;
-    $('gridWrap').children[i]?.classList.toggle('still', isStill);
-  });
-  $('stillCountLabel').textContent = `${cnt}枚`;
-}
-$('stillThreshold').oninput = updateStillHighlight;
-$('excludeStillBtn').onclick = () => {
-  const th = Number($('stillThreshold').value);
-  frames.forEach((f, i) => { if (f.motion < th) applyExclude(i, true); });
-};
-$('restoreAllBtn').onclick = () => frames.forEach((_, i) => applyExclude(i, false));
+$('powerSaveBtn').onclick = () => $('powerSaveOverlay').classList.add('active');
+$('psExitBtn').onclick = $('powerSaveOverlay').ondblclick = () => $('powerSaveOverlay').classList.remove('active');
 
-async function showFrame(idx, timeMs = playTimeMs) {
-  if (!frames[idx]) return;
-  const seq = ++renderSeq;
-  $('gridWrap').children[currentIdx]?.classList.remove('current');
-  currentIdx = idx;
-  $('gridWrap').children[currentIdx]?.classList.add('current');
-  $('currentFrameInfo').textContent = `#${idx + 1} / ${frames.length}`;
-
-  const bmp = await createImageBitmap(frames[idx].blob);
-  if (seq !== renderSeq) {
-    bmp.close();
-    return;
-  }
-  drawCompositeFrame(editorCtx, bmp, W, H, timeMs, frames[idx].elapsedMs ?? idx * 10000);
-  bmp.close();
-}
-
-function refreshCurrentPreview() {
-  if (frames.length) showFrame(currentIdx, playTimeMs);
-}
-
-$('prevFrameBtn').onclick = () => { stopPreview(); if (frames.length) showFrame(Math.max(0, currentIdx - 1)); };
-$('nextFrameBtn').onclick = () => { stopPreview(); if (frames.length) showFrame(Math.min(frames.length - 1, currentIdx + 1)); };
-
-function updateEditorStats() {
-  const active = getActiveIndices().length;
-  const fps = getFps();
-  $('editorStats').textContent = `有効 ${active}枚 / 全${frames.length}枚（約${(active / fps).toFixed(1)}秒・${fps}fps）`;
-}
-
-function stopPreview() {
-  isPlaying = false;
-  cancelAnimationFrame(playRaf);
-  $('playPreviewBtn').textContent = '▶ 再生';
-}
-
-$('playPreviewBtn').onclick = () => {
-  if (isPlaying) return stopPreview();
-  const active = getActiveIndices();
-  if (active.length < 2) return;
-  isPlaying = true;
-  $('playPreviewBtn').textContent = '⏸ 停止';
-  let pos = Math.max(0, active.indexOf(currentIdx));
-  lastPlayStep = performance.now();
-  const loop = (now) => {
-    if (!isPlaying) return;
-    const stepMs = 1000 / getFps();
-    if (now - lastPlayStep >= stepMs) {
-      playTimeMs += now - lastPlayStep;
-      lastPlayStep = now;
-      showFrame(active[pos], playTimeMs);
-      pos = (pos + 1) % active.length;
-    }
-    playRaf = requestAnimationFrame(loop);
-  };
-  playRaf = requestAnimationFrame(loop);
-};
-
-// ===== GIF & Light Editing Controls =====
-$('gifFileInput').onchange = async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  overlayGifFrames.forEach(f => f.bitmap.close());
-  overlayGifFrames = [];
-  overlayTotalMs = 0;
-  if (overlayStaticImg) { overlayStaticImg.close(); overlayStaticImg = null; }
-
-  $('removeGifBtn').style.display = 'inline-flex';
-  overlayStaticImg = await createImageBitmap(file);
-  $('gifStatusText').textContent = `設定中: ${file.name}`;
-
-  if ('ImageDecoder' in window && file.type === 'image/gif') {
-    let dec = null;
-    try {
-      dec = new ImageDecoder({ data: await file.arrayBuffer(), type: 'image/gif' });
-      await dec.tracks.ready;
-      const cnt = dec.tracks.selectedTrack.frameCount;
-      for (let i = 0; i < cnt; i++) {
-        const { image } = await dec.decode({ frameIndex: i });
-        const dur = Math.max(20, (image.duration || 100000) / 1000);
-        overlayGifFrames.push({ bitmap: await createImageBitmap(image), durationMs: dur });
-        image.close();
-        overlayTotalMs += dur;
-      }
-      $('gifStatusText').textContent = `設定中: ${file.name}（アニメ${cnt}コマ）`;
-    } catch {
-      $('gifStatusText').textContent = `設定中: ${file.name}（静止画として合成）`;
-    } finally {
-      try { dec?.close(); } catch {}
-    }
-  }
-  refreshCurrentPreview();
-};
-
-$('removeGifBtn').onclick = () => {
-  $('removeGifBtn').style.display = 'none';
-  $('gifFileInput').value = '';
-  overlayGifFrames.forEach(f => f.bitmap.close());
-  overlayGifFrames = [];
-  overlayTotalMs = 0;
-  if (overlayStaticImg) { overlayStaticImg.close(); overlayStaticImg = null; }
-  $('gifStatusText').textContent = '未設定（下の内蔵スタンプも使えます）';
-  refreshCurrentPreview();
-};
-
-$('stampPresetGroup').addEventListener('click', (e) => {
-  const btn = e.target.closest('.ratio-btn');
-  if (!btn) return;
-  $('stampPresetGroup').querySelectorAll('.ratio-btn').forEach(b => b.classList.toggle('active', b === btn));
-  editState.stampPreset = btn.dataset.stamp;
-  refreshCurrentPreview();
-});
-
-$('gifPosGroup').addEventListener('click', (e) => {
-  const btn = e.target.closest('.ratio-btn');
-  if (!btn) return;
-  $('gifPosGroup').querySelectorAll('.ratio-btn').forEach(b => b.classList.toggle('active', b === btn));
-  editState.gifPos = btn.dataset.pos;
-  refreshCurrentPreview();
-});
-
-$('gifSizeRange').oninput = () => {
-  editState.gifSizePct = Number($('gifSizeRange').value);
-  $('gifSizeVal').textContent = `${editState.gifSizePct}%`;
-  refreshCurrentPreview();
-};
-$('gifOpacityRange').oninput = () => {
-  const v = Number($('gifOpacityRange').value);
-  editState.gifOpacity = v / 100;
-  $('gifOpacityVal').textContent = `${v}%`;
-  refreshCurrentPreview();
-};
-$('gifMarginRange').oninput = () => {
-  editState.gifMarginPct = Number($('gifMarginRange').value);
-  $('gifMarginVal').textContent = `${editState.gifMarginPct}%`;
-  refreshCurrentPreview();
-};
-
-// Look & Transform
-function syncLookSliders() {
-  $('brightRange').value = editState.brightness;
-  $('brightVal').textContent = `${editState.brightness}%`;
-  $('contrastRange').value = editState.contrast;
-  $('contrastVal').textContent = `${editState.contrast}%`;
-  $('satRange').value = editState.saturate;
-  $('satVal').textContent = `${editState.saturate}%`;
-  $('rotateVal').textContent = `${editState.rotateDeg}°`;
-}
-
-$('filterPresetGroup').addEventListener('click', (e) => {
-  const btn = e.target.closest('.ratio-btn');
-  if (!btn) return;
-  $('filterPresetGroup').querySelectorAll('.ratio-btn').forEach(b => b.classList.toggle('active', b === btn));
-  const p = btn.dataset.preset;
-  if (p === 'none') Object.assign(editState, { brightness: 100, contrast: 100, saturate: 100, sepia: 0 });
-  else if (p === 'crisp') Object.assign(editState, { brightness: 106, contrast: 122, saturate: 110, sepia: 0 });
-  else if (p === 'warm') Object.assign(editState, { brightness: 104, contrast: 106, saturate: 115, sepia: 25 });
-  else if (p === 'mono') Object.assign(editState, { brightness: 104, contrast: 118, saturate: 0, sepia: 0 });
-  syncLookSliders();
-  refreshCurrentPreview();
-});
-
-$('brightRange').oninput = () => { editState.brightness = Number($('brightRange').value); $('brightVal').textContent = `${editState.brightness}%`; refreshCurrentPreview(); };
-$('contrastRange').oninput = () => { editState.contrast = Number($('contrastRange').value); $('contrastVal').textContent = `${editState.contrast}%`; refreshCurrentPreview(); };
-$('satRange').oninput = () => { editState.saturate = Number($('satRange').value); $('satVal').textContent = `${editState.saturate}%`; refreshCurrentPreview(); };
-$('rotateBtn').onclick = () => { editState.rotateDeg = (editState.rotateDeg + 90) % 360; $('rotateVal').textContent = `${editState.rotateDeg}°`; refreshCurrentPreview(); };
-$('flipBtn').onclick = () => { editState.flipH = !editState.flipH; refreshCurrentPreview(); };
-$('resetLookBtn').onclick = () => {
-  Object.assign(editState, { brightness: 100, contrast: 100, saturate: 100, sepia: 0, rotateDeg: 0, flipH: false });
-  $('filterPresetGroup').querySelectorAll('.ratio-btn').forEach(b => b.classList.toggle('active', b.dataset.preset === 'none'));
-  syncLookSliders();
-  refreshCurrentPreview();
-};
-
-// Timer & Watermark
-$('showTimerCheck').onchange = () => { editState.showTimer = $('showTimerCheck').checked; refreshCurrentPreview(); };
-$('watermarkInput').oninput = () => { editState.watermark = $('watermarkInput').value; refreshCurrentPreview(); };
-
-// ===== Export Modal & Safe MP4 Export =====
-$('openExportModalBtn').onclick = () => {
-  const active = getActiveIndices();
-  if (active.length < 2) return alert('書き出す有効なフレームが2枚以上必要です');
-  stopPreview();
-  const fps = getFps();
-  const overlayName = overlayStaticImg
-    ? `カスタム画像/GIF (${editState.gifPos.toUpperCase()}・${editState.gifSizePct}%)`
-    : (editState.stampPreset !== 'none' ? `内蔵スタンプ (${editState.stampPreset})` : 'なし');
-  $('exportSummary').innerHTML = `
-    <strong>出力解像度:</strong> ${W} × ${H} (${selectedRatio})<br>
-    <strong>有効コマ数:</strong> ${active.length}枚 / 再生時間 約${(active.length / fps).toFixed(1)}秒 (${fps}fps)<br>
-    <strong>右下GIF・スタンプ:</strong> ${overlayName}<br>
-    <strong>タイマー / 文字:</strong> ${editState.showTimer ? 'ON' : 'OFF'} / ${editState.watermark.trim() || 'なし'}
-  `;
-  $('exportModal').classList.add('open');
-};
-$('closeExportModalBtn').onclick = () => $('exportModal').classList.remove('open');
-$('exportModal').onclick = (e) => { if (e.target === $('exportModal')) $('exportModal').classList.remove('open'); };
-
+// ===== Direct WebM Export (for External Video Editors) =====
 const setProgress = (active, label = '', pct = 0) => {
   $('progressWrap').classList.toggle('active', active);
   $('progressLabel').textContent = label;
@@ -924,151 +437,95 @@ const setProgress = (active, label = '', pct = 0) => {
   $('progressFill').style.width = pct + '%';
 };
 
-function addDownload(blob, ext) {
-  if (!blob || blob.size === 0) return alert('動画データの生成に失敗しました（0バイト）。');
-  const a = Object.assign(document.createElement('a'), {
-    className: 'dl-link',
-    href: URL.createObjectURL(blob),
-    download: `komaclip_${Date.now()}.${ext}`,
-    textContent: `⬇ ${ext.toUpperCase()} をダウンロード (${(blob.size / 1024 / 1024).toFixed(2)} MB)`
-  });
-  $('downloadLinks').prepend(a);
-  a.click();
-}
-
-$('exportMp4Btn').onclick = async () => {
-  const active = getActiveIndices();
-  if (active.length < 2) return alert('有効なフレームが2枚以上必要です');
-  $('exportMp4Btn').disabled = true;
+$('exportWebmBtn').onclick = async () => {
+  if (frames.length < 2) return alert('書き出すコマが2枚以上必要です');
+  $('exportWebmBtn').disabled = true;
+  $('exportCard').style.display = 'grid';
 
   const fps = getFps();
-  const bitrate = Number($('exportQualitySelect').value) || 6_000_000;
   const [comp, cctx] = makeCanvas(W, H);
-  try {
-    setProgress(true, 'MP4エンコーダ準備中...', 5);
-    if ('VideoEncoder' in window && 'VideoFrame' in window) {
-      const { Muxer, ArrayBufferTarget } = await import('https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.mjs');
-      let chosen = null;
-      for (const codec of ['avc1.64002a', 'avc1.4d002a', 'avc1.42002a', 'avc1.42001f']) {
-        try {
-          const support = await VideoEncoder.isConfigSupported({ codec, width: W, height: H, bitrate, framerate: fps });
-          if (support.supported) { chosen = codec; break; }
-        } catch {}
-      }
-
-      if (chosen) {
-        let encoderErr = null;
-        const muxer = new Muxer({
-          target: new ArrayBufferTarget(),
-          video: { codec: 'avc', width: W, height: H },
-          fastStart: 'in-memory',
-          firstTimestampBehavior: 'offset'
-        });
-        const encoder = new VideoEncoder({
-          output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-          error: (e) => { encoderErr = e; }
-        });
-        encoder.configure({ codec: chosen, width: W, height: H, bitrate, framerate: fps });
-
-        const frameUs = Math.round(1_000_000 / fps);
-        const frameMs = 1000 / fps;
-        for (let i = 0; i < active.length; i++) {
-          if (encoderErr) throw encoderErr;
-          while (encoder.encodeQueueSize > 8) {
-            await new Promise(r => setTimeout(r, 10));
-            if (encoderErr) throw encoderErr;
-          }
-          const f = frames[active[i]];
-          const bmp = await createImageBitmap(f.blob);
-          drawCompositeFrame(cctx, bmp, W, H, i * frameMs, f.elapsedMs ?? active[i] * 10000);
-          bmp.close();
-
-          const vf = new VideoFrame(comp, { timestamp: i * frameUs, duration: frameUs });
-          encoder.encode(vf, { keyFrame: i % Math.max(1, fps * 2) === 0 });
-          vf.close();
-
-          if (i % 5 === 0 || i === active.length - 1) {
-            setProgress(true, `MP4生成中... (${i + 1}/${active.length})`, 10 + ((i + 1) / active.length) * 85);
-            await new Promise(r => setTimeout(r, 0));
-          }
-        }
-        await encoder.flush();
-        if (encoderErr) throw encoderErr;
-        encoder.close();
-        muxer.finalize();
-        addDownload(new Blob([muxer.target.buffer], { type: 'video/mp4' }), 'mp4');
-        setBadge('done', 'MP4保存完了');
-        return;
-      }
-    }
-    await exportFallback(active, fps, comp, cctx, bitrate);
-  } catch (err) {
-    console.warn('WebCodecs MP4出力に失敗したため互換モードへ切替:', err);
-    await exportFallback(active, fps, comp, cctx, bitrate);
-  } finally {
-    setProgress(false);
-    $('exportMp4Btn').disabled = false;
-  }
-};
-
-async function exportFallback(active, fps, comp, cctx, bitrate) {
   comp.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;pointer-events:none;';
   document.body.appendChild(comp);
+
   try {
-    const mime = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m)) || '';
-    const rec = new MediaRecorder(comp.captureStream(fps), mime ? { mimeType: mime, videoBitsPerSecond: bitrate } : {});
+    setProgress(true, 'WebM書き出し準備中...', 2);
+    const mime = [
+      'video/webm;codecs=vp9',
+      'video/webm;codecs=vp8',
+      'video/webm'
+    ].find(m => MediaRecorder.isTypeSupported(m)) || '';
+
+    const stream = comp.captureStream(fps);
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 6_000_000 } : {});
     const chunks = [];
     const done = new Promise(r => rec.onstop = r);
-    rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    rec.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+
     rec.start();
     const delay = 1000 / fps;
-    for (let i = 0; i < active.length; i++) {
-      const f = frames[active[i]];
-      const bmp = await createImageBitmap(f.blob);
-      drawCompositeFrame(cctx, bmp, W, H, i * delay, f.elapsedMs ?? active[i] * 10000);
+    const t0 = performance.now();
+
+    for (let i = 0; i < frames.length; i++) {
+      const bmp = await createImageBitmap(frames[i].blob);
+      cctx.drawImage(bmp, 0, 0, W, H);
       bmp.close();
-      setProgress(true, `互換モード書き出し中... (${i + 1}/${active.length})`, ((i + 1) / active.length) * 95);
-      await new Promise(r => setTimeout(r, delay));
+
+      setProgress(true, `WebM生成中... (${i + 1}/${frames.length})`, ((i + 1) / frames.length) * 96);
+
+      // デコード時間を含めたドリフト補正でフレーム間隔を安定化
+      const nextTarget = t0 + (i + 1) * delay;
+      const waitMs = Math.max(0, nextTarget - performance.now());
+      await new Promise(r => setTimeout(r, waitMs));
     }
+
     await new Promise(r => setTimeout(r, delay));
     rec.stop();
     await done;
-    const ext = mime.includes('mp4') ? 'mp4' : 'webm';
-    addDownload(new Blob(chunks, { type: mime || 'video/webm' }), ext);
-    setBadge('done', `${ext.toUpperCase()}保存完了`);
+
+    const blob = new Blob(chunks, { type: mime || 'video/webm' });
+    if (blob.size === 0) throw new Error('WebMデータが0バイトになりました');
+
+    const a = Object.assign(document.createElement('a'), {
+      className: 'dl-link',
+      href: URL.createObjectURL(blob),
+      download: `komaclip_${Date.now()}.webm`,
+      textContent: `⬇ WebM をダウンロード (${(blob.size / 1024 / 1024).toFixed(2)} MB / ${frames.length}コマ)`
+    });
+    $('downloadLinks').prepend(a);
+    a.click();
+    setBadge('done', 'WebM保存完了');
+    $('hint').textContent = 'WebMファイルを書き出しました。編集ソフトに読み込んで編集してください。';
+  } catch (e) {
+    alert('WebM書き出しエラー: ' + e.message);
   } finally {
     comp.remove();
+    setProgress(false);
+    $('exportWebmBtn').disabled = false;
   }
-}
+};
 
-// ===== DB Clear, Shortcuts & Restore =====
+// ===== DB Clear & Restore =====
 $('settingsClearDbBtn').onclick = async () => {
   if (!confirm('保存されている撮影データをすべて消去しますか？')) return;
   try { await storage.clearAll(); } catch {}
-  revokeFrameUrls();
   frames = [];
-  currentIdx = 0;
+  droppedStillCount = 0;
+  prevDiffData = null;
+  elapsedMs = 0;
+  if (lastShotUrl) { URL.revokeObjectURL(lastShotUrl); lastShotUrl = null; }
+  $('lastShotImg').style.display = 'none';
+  $('placeholder').style.display = 'grid';
+  $('exportCard').style.display = 'none';
+  $('downloadLinks').innerHTML = '';
   updateStats();
   $('dbStatus').textContent = '消去済み';
-  renderEditor();
 };
-
-window.addEventListener('keydown', (e) => {
-  if (e.target && e.target.matches && e.target.matches('input, textarea, select')) return;
-  if (!$('tab-edit').classList.contains('active') || $('exportModal').classList.contains('open')) return;
-  if (!frames.length) return;
-
-  if (e.key === 'ArrowLeft') { e.preventDefault(); stopPreview(); showFrame(Math.max(0, currentIdx - 1)); }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); stopPreview(); showFrame(Math.min(frames.length - 1, currentIdx + 1)); }
-  else if (e.code === 'Space') { e.preventDefault(); $('playPreviewBtn').click(); }
-  else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); applyExclude(currentIdx, !frames[currentIdx].excluded); }
-});
 
 (async () => {
   try {
     const restored = await storage.restoreAll();
     if (restored.frames.length > 0) {
-      if (confirm(`前回の未保存データ（${restored.frames.length}枚）が見つかりました。復元しますか？`)) {
+      if (confirm(`前回の未出力データ（${restored.frames.length}枚）が見つかりました。復元しますか？`)) {
         frames = restored.frames;
         if (restored.meta) {
           if (restored.meta.selectedRatio) setRatio(restored.meta.selectedRatio);
@@ -1076,9 +533,17 @@ window.addEventListener('keydown', (e) => {
           H = restored.meta.H || H;
           elapsedMs = restored.meta.elapsedMs || 0;
         }
+        const last = frames[frames.length - 1];
+        if (last?.blob) {
+          lastShotUrl = URL.createObjectURL(last.blob);
+          $('lastShotImg').src = lastShotUrl;
+          $('lastShotImg').style.display = 'block';
+          $('placeholder').style.display = 'none';
+        }
         updateStats();
-        $('dbStatus').textContent = `復元済 (${frames.length})`;
-        switchTab('edit');
+        $('exportCard').style.display = 'grid';
+        $('dbStatus').textContent = `復元済 (${frames.length}枚)`;
+        setBadge('done', '復元完了');
       } else {
         await storage.clearAll();
       }
@@ -1090,7 +555,6 @@ window.addEventListener('keydown', (e) => {
 
 window.addEventListener('beforeunload', () => {
   stopWorkerTimer();
-  stopPip();
+  stopPreviewStream();
   if (wakeLock) wakeLock.release().catch(() => {});
-  if (stream) stream.getTracks().forEach(t => t.stop());
 });
