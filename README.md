@@ -1,5 +1,7 @@
 # KomaClip — 勉強タイムラプス
 
+https://u0wou.github.io/komaclip/
+
 10秒に1枚自動で撮影し、離席カット・右下GIF合成・軽い色調調整を行ってローカルでMP4出力できるWebアプリです。
 
 ## 主な機能
