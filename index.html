@@ -2,333 +2,249 @@
 <html lang="ja" data-theme="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>KomaClip — 省電力・勉強タイムラプス撮影</title>
-  <script>
-// ===== エラー自動検知＆確認パネル（KomaClip Guard） =====
-(function () {
-  const hints = [
-    { match: /CORS|Failed to fetch dynamically imported module|origin 'null'/i, msg: 'index.html を直接ダブルクリック（file://）で開いている可能性があります。VS Code の Live Server や `python -m http.server`、または GitHub Pages 経由で開いてください。' },
-    { match: /is null|Cannot read properties of null|Cannot read properties of undefined/i, msg: 'HTMLとJSのバージョンズレ（ID不足）またはブラウザキャッシュの可能性があります。Ctrl+Shift+R（MacはCmd+Shift+R）でスーパーリロードしてください。' },
-    { match: /allocate videosource|NotReadableError/i, msg: 'カメラが他のアプリや別タブで使用中、または連続再接続でカメラドライバが一時停止した可能性があります。別タブを閉じるかUSBを挿し直してください。' },
-    { match: /OverconstrainedError/i, msg: '選択したカメラが取り外されたか、指定解像度に対応していない可能性があります。別のカメラを選び直すか解像度を下げてください。' },
-    { match: /NotAllowedError|Permission denied/i, msg: 'カメラのアクセス権限が拒否されています。アドレスバー左のアイコンから許可してください。' },
-    { match: /IndexedDB|QuotaExceededError/i, msg: 'ブラウザの保存容量不足、またはプライベートブラウズによる保存制限の可能性があります。' }
-  ];
-
-  function createPanel() {
-    let box = document.getElementById('kc-error-box');
-    if (box) return box;
-    box = document.createElement('div');
-    box.id = 'kc-error-box';
-    box.style.cssText = [
-      'position:fixed', 'right:16px', 'bottom:16px', 'z-index:99999',
-      'width:min(420px, calc(100vw - 32px))', 'max-height:50vh', 'overflow:auto',
-      'background:#1a1016', 'color:#ffe4e8', 'border:1px solid #ff4757',
-      'border-radius:14px', 'padding:14px', 'font-family:sans-serif',
-      'font-size:12px', 'box-shadow:0 12px 32px rgba(0,0,0,0.45)', 'display:grid', 'gap:8px'
-    ].join(';');
-    box.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-        <strong style="color:#ff6b81;">⚠️ エラーを検知しました</strong>
-        <div style="display:flex;gap:6px;">
-          <button id="kc-err-copy" style="padding:4px 10px;border-radius:999px;border:none;background:#ff4757;color:#fff;font-size:11px;font-weight:700;cursor:pointer;">コピー</button>
-          <button id="kc-err-close" style="padding:4px 10px;border-radius:999px;border:1px solid #555;background:transparent;color:#ccc;font-size:11px;cursor:pointer;">閉じる</button>
-        </div>
-      </div>
-      <div id="kc-err-hint" style="background:rgba(255,176,32,0.14);color:#ffd166;padding:8px;border-radius:8px;display:none;"></div>
-      <pre id="kc-err-log" style="margin:0;white-space:pre-wrap;word-break:break-all;background:rgba(0,0,0,0.35);padding:8px;border-radius:8px;font-size:11px;color:#ffb8c2;"></pre>
-    `;
-    (document.body || document.documentElement).appendChild(box);
-    box.querySelector('#kc-err-close').onclick = () => box.remove();
-    box.querySelector('#kc-err-copy').onclick = () => {
-      const text = box.querySelector('#kc-err-log').textContent;
-      navigator.clipboard?.writeText(text).then(() => {
-        box.querySelector('#kc-err-copy').textContent = 'コピー済';
-        setTimeout(() => { const b = box.querySelector('#kc-err-copy'); if (b) b.textContent = 'コピー'; }, 1500);
-      });
-    };
-    return box;
-  }
-
-  function showError(summary, detail) {
-    const box = createPanel();
-    const fullText = `[${new Date().toLocaleTimeString()}] ${summary}\n${detail}`;
-    const logEl = box.querySelector('#kc-err-log');
-    logEl.textContent = logEl.textContent ? `${logEl.textContent}\n---\n${fullText}` : fullText;
-
-    const matched = hints.find(h => h.match.test(fullText));
-    const hintEl = box.querySelector('#kc-err-hint');
-    if (matched) {
-      hintEl.textContent = '💡 目安: ' + matched.msg;
-      hintEl.style.display = 'block';
-    }
-  }
-
-  if (location.protocol === 'file:') {
-    window.addEventListener('DOMContentLoaded', () => {
-      showError('file:// プロトコルでの起動を検知', 'ES Module（app.js）がブラウザのセキュリティ制限で読み込めない場合があります。簡易サーバー経由で開いてください。');
-    });
-  }
-
-  window.addEventListener('error', (e) => {
-    const loc = e.filename ? `${e.filename}:${e.lineno}:${e.colno}` : 'unknown';
-    showError(e.message || 'Script Error', `場所: ${loc}`);
-  });
-
-  window.addEventListener('unhandledrejection', (e) => {
-    const reason = e.reason;
-    const msg = reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason);
-    const stack = reason instanceof Error && reason.stack ? reason.stack.split('\n').slice(0, 3).join('\n') : '';
-    showError('非同期エラー (Promise)', `${msg}\n${stack}`);
-  });
-})();
-</script>
-  <link rel="stylesheet" href="./style.css?v=7">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KomaClip — 省電力タイムラプス撮影</title>
+  <link rel="stylesheet" href="./style.css?v=1.0.0">
 </head>
 <body>
-<div class="shell" id="appShell">
-  <!-- Minimal Left Sidebar -->
-  <aside class="sidebar" id="sidebar">
-    <nav class="side-nav">
-      <button class="nav-item active" data-tab="record" title="撮影・WebM出力">🎬</button>
-      <button class="nav-item" data-tab="settings" title="ストレージ・設定">⚙️</button>
-      <button class="nav-item" data-tab="info" title="仕様・使い方">ℹ️</button>
-    </nav>
-  </aside>
-
-  <!-- Main Workspace -->
-  <div class="main">
-    <header class="topbar">
-      <div class="top-left">
-        <button class="pill-btn icon-only" id="sidebarToggleBtn" title="サイドバー開閉">☰</button>
-        <div class="brand-inline">
-          <span class="brand-dot">K</span>
-          <strong>KomaClip</strong>
-        </div>
+<div class="app">
+  <header class="topbar">
+    <div class="top-left">
+      <div class="brand">
+        <span class="brand-mark">K</span>
+        <span>KomaClip</span>
       </div>
-      <div class="top-actions">
-        <div class="badge" id="badge"><span class="led"></span><span id="badgeText">待機中</span></div>
-        <button class="pill-btn" id="powerSaveBtn" title="画面を暗くして省電力化">🔋 省電力</button>
-        <button class="pill-btn" id="themeBtn">🌙 ダーク</button>
+    </div>
+    <div class="top-actions">
+      <div class="badge" id="badge"><span class="led"></span><span id="badgeText">待機中</span></div>
+      <button type="button" class="pill-btn" id="powerSaveBtn" title="画面を暗くして省電力化">省電力</button>
+      <button type="button" class="pill-btn" id="themeBtn">ダーク</button>
+      <button type="button" class="pill-btn" id="settingsBtn">設定</button>
+    </div>
+  </header>
+
+  <main class="record-grid">
+    <!-- Preview Stage -->
+    <section class="card">
+      <div class="row-between">
+        <span class="card-title" id="guideLabel">ノート・手元ガイド (9:16)</span>
+        <button type="button" class="mini-btn" id="toggleGuideBtn">ガイド切替</button>
       </div>
-    </header>
 
-    <!-- TAB 1: RECORD & DIRECT WEBM EXPORT -->
-    <section class="tab-panel active" id="tab-record">
-      <div class="record-grid">
-        <!-- Main Stage Card -->
-        <div class="card stage-card">
-          <div class="stage-head">
-            <span class="stage-title" id="guideLabel">▶ ノート・手元ガイド (9:16)</span>
-            <button class="mini-pill" id="toggleGuideBtn">👁️ ガイド切替</button>
-          </div>
+      <div class="stage-wrap" id="stageWrap">
+        <video id="preview" autoplay muted playsinline></video>
+        <img id="lastShotImg" alt="最新撮影コマ">
 
-          <div class="stage-wrap" id="stageWrap">
-            <video id="preview" autoplay muted playsinline></video>
-            <img id="lastShotImg" alt="最新撮影コマ">
-
-            <div class="stage-placeholder" id="placeholder">
-              <div class="hero-icon">📷</div>
-              <h2>発熱防止・間欠撮影モード</h2>
-              <p>撮影の瞬間だけカメラを起動してすぐ停止。編集は外部ソフト前提で、静止（離席）コマを自動除外してWebM出力します。</p>
-              <div class="hero-btns">
-                <button class="btn btn-primary btn-lg" id="heroCamBtn">📷 構図テスト接続</button>
-              </div>
-            </div>
-
-            <div class="cam-sleep-badge" id="camSleepBadge" style="display:none;">
-              💤 カメラ停止中（次の撮影まで待機）
-            </div>
-
-            <div class="guide-layer" id="guideLayer"></div>
-            <div class="next-shot-bar" id="nextShotBar"></div>
-            <div class="flash" id="flash"></div>
+        <div class="stage-placeholder" id="placeholder">
+          <h2>間欠タイムラプス撮影</h2>
+          <p>撮影の瞬間だけカメラを起動して即停止。静止コマを自動除外してWebMで書き出します。</p>
+          <div class="btns" style="justify-content:center; margin-top:4px;">
+            <button type="button" class="btn btn-primary" id="heroCamBtn">構図確認を開始</button>
           </div>
         </div>
 
-        <!-- Right Column: Status & Auto-Still Filter -->
-        <div class="card status-card">
-          <div class="card-title">📊 撮影・静止除外ステータス</div>
-          <div class="stats-grid">
-            <div class="stat-box tint-blue">
-              <div class="stat-label">採用コマ数</div>
-              <div class="stat-val" id="frameCount">0<span>枚</span></div>
-            </div>
-            <div class="stat-box tint-purple">
-              <div class="stat-label">勉強時間</div>
-              <div class="stat-val" id="elapsed">00:00</div>
-            </div>
-            <div class="stat-box tint-mint">
-              <div class="stat-label">WebM長さ</div>
-              <div class="stat-val" id="estDuration">0.0<span>秒</span></div>
-            </div>
-            <div class="stat-box tint-warn">
-              <div class="stat-label">静止破棄</div>
-              <div class="stat-val" id="droppedCount">0<span>枚</span></div>
-            </div>
-          </div>
+        <div class="cam-sleep-badge" id="camSleepBadge" style="display:none;">カメラ停止中（待機）</div>
+        <div class="guide-layer" id="guideLayer"></div>
+        <div class="next-shot-bar" id="nextShotBar"></div>
+        <div class="flash" id="flash"></div>
+      </div>
+    </section>
 
-          <div class="still-box">
-            <div class="row-between">
-              <label class="check-row">
-                <input type="checkbox" id="autoDropStillCheck" checked>
-                <span>🟠 静止・離席を自動破棄</span>
-              </label>
-              <span id="stillThVal" class="muted-text">感度 3.5</span>
-            </div>
-            <input type="range" id="stillThreshold" min="1" max="15" step="0.5" value="3.5">
-            <div class="muted-text" style="font-size:11px;">
-              前回コマと動きがほぼ同じ（閾値未満）の画像は保存せず即破棄します。
-            </div>
-          </div>
-
-          <div class="mini-flow-note" id="camStateNote">
-            <strong>🌡️ カメラ保護（間欠駆動）:</strong><br>
-            撮影時のみ起動 → 1枚保存 → 即 <code>track.stop()</code> で発熱を防止します。
-          </div>
+    <!-- Status & Still Auto-Drop -->
+    <aside class="card">
+      <div class="card-title">ステータス</div>
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-label">採用コマ</div>
+          <div class="stat-val"><span id="frameCount">0</span><span class="stat-unit">枚</span></div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">経過時間</div>
+          <div class="stat-val" id="elapsed">00:00</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">WebM長さ</div>
+          <div class="stat-val"><span id="estDuration">0.0</span><span class="stat-unit">秒</span></div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">静止破棄</div>
+          <div class="stat-val"><span id="droppedCount">0</span><span class="stat-unit">枚</span></div>
         </div>
       </div>
 
-      <!-- Settings Card -->
-      <div class="card settings-card">
-        <div class="card-title">⚙️ カメラ選択・撮影＆WebM出力設定</div>
-        <div class="camera-select-bar">
-          <div class="field" style="flex:1; min-width:220px;">
-            <label for="cameraSelect">使用カメラ（デバイスID指定）</label>
-            <select id="cameraSelect">
-              <option value="">自動（既定カメラ）— 「構図確認」後に全カメラ名を取得</option>
-            </select>
-          </div>
-          <div class="btns" style="align-self:end;">
-            <button class="btn" id="refreshCamListBtn" title="USBカメラの抜き差し後に一覧を更新">🔍 一覧更新</button>
-            <button class="btn" id="switchCamBtn" title="検出された次のカメラへ順番に切替">🔄 次のカメラへ</button>
-          </div>
-        </div>
-
-        <div class="settings-row">
-          <div class="field">
-            <label>比率</label>
-            <div class="ratio-group" id="ratioGroup">
-              <button class="ratio-btn active" data-ratio="9:16">9:16</button>
-              <button class="ratio-btn" data-ratio="16:9">16:9</button>
-              <button class="ratio-btn" data-ratio="4:3">4:3</button>
-              <button class="ratio-btn" data-ratio="1:1">1:1</button>
-            </div>
-          </div>
-          <div class="field">
-            <label for="intervalSelect">撮影間隔</label>
-            <select id="intervalSelect">
-              <option value="5000">5秒（テスト・短時間）</option>
-              <option value="10000" selected>10秒（1〜2時間・規定）</option>
-              <option value="15000">15秒（長時間）</option>
-              <option value="20000">20秒（3時間以上）</option>
-              <option value="30000">30秒（超長時間）</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="resSelect">解像度</label>
-            <select id="resSelect">
-              <option value="854" selected>480p SD（省電力・規定）</option>
-              <option value="1280">720p HD（標準）</option>
-              <option value="1920">1080p Full HD</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="fpsSelect">WebM FPS</label>
-            <select id="fpsSelect">
-              <option value="10">10 fps</option>
-              <option value="15" selected>15 fps（規定）</option>
-              <option value="24">24 fps</option>
-              <option value="30">30 fps</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="guideSelect">構図ガイド</label>
-            <select id="guideSelect">
-              <option value="study" selected>ノート・手元ガイド</option>
-              <option value="thirds">三分割グリッド</option>
-              <option value="horizon">水平・中心線</option>
-              <option value="off">ガイドなし</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <!-- Bottom Action Dock -->
-      <div class="card action-dock">
-        <div class="btns">
-          <button class="btn" id="connectCamBtn">📷 構図確認（カメラON）</button>
-          <button class="btn btn-warn-soft" id="pauseBtn" disabled>⏸ 一時停止</button>
-          <button class="btn btn-danger-soft" id="stopRecBtn" disabled>■ 撮影終了</button>
-        </div>
-        <div class="btns">
-          <button class="btn btn-ok-soft" id="exportWebmBtn" disabled>⬇ WebM書き出し (0枚)</button>
-          <button class="btn btn-primary btn-lg" id="startBtn">▶ 間欠録画スタート</button>
-        </div>
-      </div>
-
-      <!-- Export Progress & Download Box -->
-      <div class="card" id="exportCard" style="display:none;">
+      <div class="still-box">
         <div class="row-between">
-          <strong style="font-size:13px;">🎞️ WebM動画書き出し（編集ソフト用素材）</strong>
-          <span class="muted-text" id="dbStatus">保存完了</span>
+          <label class="check-row">
+            <input type="checkbox" id="autoDropStillCheck" checked>
+            <span>静止・離席を自動破棄</span>
+          </label>
+          <span id="stillThVal" class="muted-text">感度 3.5</span>
         </div>
-        <div class="progress-wrap" id="progressWrap">
-          <div class="progress-text">
-            <span id="progressLabel">WebM生成中...</span>
-            <span id="progressPct">0%</span>
-          </div>
-          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-        </div>
-        <div class="download-links" id="downloadLinks"></div>
+        <input type="range" id="stillThreshold" min="1" max="15" step="0.5" value="3.5">
+        <div class="small-note">前回コマとの輝度差分が閾値未満なら保存せず破棄します。</div>
       </div>
-    </section>
 
-    <!-- TAB 2: SETTINGS -->
-    <section class="tab-panel" id="tab-settings">
-      <div class="card">
-        <div class="card-title">⚙️ ストレージ＆カメラ設定</div>
-        <p class="muted-text">採用されたコマは1枚ずつ IndexedDB に保存されます。出力完了後や新規撮影前に消去できます。</p>
-        <div class="field" style="max-width:280px;">
-          <label for="warmupMsSelect">カメラ起動後の露出安定待ち時間</label>
-          <select id="warmupMsSelect">
-            <option value="350">350ms（最短・省電力）</option>
-            <option value="600" selected>600ms（標準・白飛び防止）</option>
-            <option value="1000">1000ms（露出安定重視）</option>
-          </select>
-        </div>
-        <div class="btns">
-          <button class="btn btn-danger-soft" id="settingsClearDbBtn">🗑️ IndexedDB の保存データを完全に消去</button>
+      <div class="small-note" id="nextIntervalInfo">次回撮影間隔: ランダム（10〜40秒）</div>
+    </aside>
+  </main>
+
+  <!-- Camera & Capture Settings -->
+  <section class="card">
+    <div class="camera-bar">
+      <div class="field" style="flex:1; min-width:200px;">
+        <label for="cameraSelect">使用カメラ（デバイスID）</label>
+        <select id="cameraSelect">
+          <option value="">自動（既定カメラ）</option>
+        </select>
+      </div>
+      <div class="btns">
+        <button type="button" class="btn" id="refreshCamListBtn">一覧更新</button>
+        <button type="button" class="btn" id="switchCamBtn">次のカメラへ</button>
+      </div>
+    </div>
+
+    <div class="settings-row">
+      <div class="field">
+        <label>比率</label>
+        <div class="ratio-group" id="ratioGroup">
+          <button type="button" class="ratio-btn active" data-ratio="9:16">9:16</button>
+          <button type="button" class="ratio-btn" data-ratio="16:9">16:9</button>
+          <button type="button" class="ratio-btn" data-ratio="4:3">4:3</button>
+          <button type="button" class="ratio-btn" data-ratio="1:1">1:1</button>
         </div>
       </div>
-    </section>
-
-    <!-- TAB 3: INFO -->
-    <section class="tab-panel" id="tab-info">
-      <div class="card">
-        <div class="card-title">ℹ️ KomaClip（間欠撮影・素材出力専用）について</div>
-        <ul class="info-list">
-          <li><strong>複数カメラ対応（デバイスID選択）：</strong>内蔵カメラとUSB外付けカメラなど複数台ある環境でも、<code>enumerateDevices()</code> で検出したカメラ名から直接選択・ワンクリック切替できます。</li>
-          <li><strong>発熱防止の間欠駆動：</strong>撮影時のみ <code>getUserMedia</code> を呼び出して1枚撮影し、即座に <code>track.stop()</code> でカメラを物理停止します。</li>
-          <li><strong>静止・離席の自動破棄：</strong>前回採用したフレームとの差分（64×36輝度平均差分）を計算し、閾値未満の静止画像は保存せず破棄します。</li>
-          <li><strong>編集ソフト連携前提のWebM出力：</strong>ブラウザ内編集を廃止し、撮影した全採用コマを WebM（VP9/VP8）へ変換してダウンロードします。</li>
-        </ul>
+      <div class="field">
+        <label for="intervalSelect">撮影間隔</label>
+        <select id="intervalSelect">
+          <option value="random" selected>ランダム（10〜40秒）</option>
+          <option value="5000">5秒（固定）</option>
+          <option value="10000">10秒（固定）</option>
+          <option value="15000">15秒（固定）</option>
+          <option value="20000">20秒（固定）</option>
+          <option value="30000">30秒（固定）</option>
+        </select>
       </div>
-    </section>
+      <div class="field">
+        <label for="resSelect">解像度</label>
+        <select id="resSelect">
+          <option value="854" selected>480p（省電力）</option>
+          <option value="1280">720p（標準）</option>
+          <option value="1920">1080p（高画質）</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="fpsSelect">WebM FPS</label>
+        <select id="fpsSelect">
+          <option value="10">10 fps</option>
+          <option value="15" selected>15 fps</option>
+          <option value="24">24 fps</option>
+          <option value="30">30 fps</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="guideSelect">構図ガイド</label>
+        <select id="guideSelect">
+          <option value="study" selected>ノート・手元</option>
+          <option value="thirds">三分割</option>
+          <option value="horizon">水平・中心</option>
+          <option value="off">なし</option>
+        </select>
+      </div>
+    </div>
+  </section>
 
-    <div class="footer-hint" id="hint">準備完了 — まず「構図確認」または「一覧更新」でカメラを検出し、使うカメラを選んでください</div>
+  <!-- Action Dock -->
+  <section class="card action-dock">
+    <div class="btns">
+      <button type="button" class="btn" id="connectCamBtn">構図確認（ON）</button>
+      <button type="button" class="btn" id="pauseBtn" disabled>一時停止</button>
+      <button type="button" class="btn" id="stopRecBtn" disabled>撮影終了</button>
+    </div>
+    <div class="btns">
+      <button type="button" class="btn btn-outline" id="exportWebmBtn" disabled>WebM書き出し (0枚)</button>
+      <button type="button" class="btn btn-primary" id="startBtn">間欠録画スタート</button>
+    </div>
+  </section>
+
+  <!-- Export Box -->
+  <section class="card" id="exportCard" style="display:none;">
+    <div class="row-between">
+      <span class="card-title">WebM書き出し</span>
+      <span class="muted-text" id="dbStatus">待機中</span>
+    </div>
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-text">
+        <span id="progressLabel">WebM生成中...</span>
+        <span id="progressPct">0%</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    </div>
+    <div class="download-links" id="downloadLinks"></div>
+  </section>
+
+  <div class="footer-hint" id="hint">準備完了 — 「構図確認」または「一覧更新」でカメラを選択してください</div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-backdrop" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="settingsModalTitle">設定</h3>
+      <button type="button" class="mini-btn" id="closeSettingsBtn">閉じる</button>
+    </div>
+
+    <div class="version-row">
+      <span>バージョン</span>
+      <span class="version-tag" id="appVersion">ver.1.0.0</span>
+    </div>
+
+    <div class="field">
+      <label for="warmupMsSelect">カメラ起動後の露出安定待ち時間</label>
+      <select id="warmupMsSelect">
+        <option value="350">350ms（最短・省電力）</option>
+        <option value="600" selected>600ms（標準・白飛び防止）</option>
+        <option value="1000">1000ms（露出安定重視）</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>ストレージ管理（IndexedDB）</label>
+      <div class="btns">
+        <button type="button" class="btn" id="settingsClearDbBtn">保存データをすべて消去</button>
+      </div>
+      <div class="small-note">採用コマは1枚ずつ IndexedDB に保存され、メモリ消費を抑えています。</div>
+    </div>
+
+    <ul class="spec-list">
+      <li>間欠駆動：撮影時のみ起動し、1枚保存後に即座にカメラを停止します。</li>
+      <li>ランダム間隔：10秒〜40秒の範囲で毎コマ待機時間をランダム抽選します。</li>
+      <li>静止自動破棄：前回コマとの輝度差が小さい画像を保存せず破棄します。</li>
+    </ul>
+  </div>
+</div>
+
+<!-- In-Page Confirm Modal -->
+<div class="modal-backdrop" id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="confirmTitle">確認</h3>
+    </div>
+    <p class="muted-text" id="confirmMessage"></p>
+    <div class="btns" style="justify-content:flex-end;">
+      <button type="button" class="btn" id="confirmCancelBtn">キャンセル</button>
+      <button type="button" class="btn btn-primary" id="confirmOkBtn">実行</button>
+    </div>
   </div>
 </div>
 
 <!-- Power-Save Overlay -->
 <div id="powerSaveOverlay">
   <div class="ps-dot"></div>
-  <div>省電力モード稼働中（間欠撮影は継続しています）</div>
+  <div>省電力モード稼働中（間欠撮影継続中）</div>
   <div class="ps-stats" id="psStats">0枚 ・ 00:00</div>
-  <div class="ps-hint" id="psExitBtn">ダブルタップまたはクリックで復帰</div>
+  <div class="ps-hint" id="psExitBtn">タップまたはダブルクリックで復帰</div>
 </div>
 
-<script type="module" src="./app.js?v=7"></script>
+<script type="module" src="./app.js?v=1.0.0"></script>
 </body>
 </html>

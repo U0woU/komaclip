@@ -9,7 +9,7 @@ export class KomaStorage {
   async init() {
     if (this.db) return this.db;
     if (typeof indexedDB === 'undefined') {
-      throw new Error('このブラウザ環境では IndexedDB が利用できません。');
+      throw new Error('IndexedDB が利用できません');
     }
     return new Promise((resolve, reject) => {
       const req = indexedDB.open(this.dbName, this.version);
@@ -67,7 +67,17 @@ export class KomaStorage {
     });
   }
 
-  async restoreAll() {
+  async getFrameBlob(id) {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('frames', 'readonly');
+      const req = tx.objectStore('frames').get(id);
+      req.onsuccess = () => resolve(req.result?.blob || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async restoreSummary() {
     const db = await this.init();
     const meta = await new Promise((resolve, reject) => {
       const tx = db.transaction('meta', 'readonly');
@@ -75,18 +85,29 @@ export class KomaStorage {
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => reject(req.error);
     });
-    const records = await new Promise((resolve, reject) => {
+    const frames = [];
+    let lastBlob = null;
+    await new Promise((resolve, reject) => {
       const tx = db.transaction('frames', 'readonly');
-      const req = tx.objectStore('frames').getAll();
-      req.onsuccess = () => resolve(req.result || []);
+      const req = tx.objectStore('frames').openCursor();
+      req.onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (!cursor) {
+          resolve();
+          return;
+        }
+        const r = cursor.value;
+        frames.push({
+          id: r.id,
+          blob: null,
+          elapsedMs: typeof r.elapsedMs === 'number' ? r.elapsedMs : frames.length * 10000
+        });
+        lastBlob = r.blob || lastBlob;
+        cursor.continue();
+      };
       req.onerror = () => reject(req.error);
     });
-    const frames = records.map((r, idx) => ({
-      id: r.id,
-      blob: r.blob,
-      elapsedMs: typeof r.elapsedMs === 'number' ? r.elapsedMs : idx * 10000
-    }));
-    return { meta, frames };
+    return { meta, frames, lastBlob };
   }
 
   clearAll() {

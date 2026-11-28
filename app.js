@@ -1,22 +1,49 @@
 import { KomaStorage } from './koma-storage.js';
 
+const APP_VERSION = 'ver.1.0.0';
+const RANDOM_MIN_SEC = 10;
+const RANDOM_MAX_SEC = 40;
+const DIFF_W = 48;
+const DIFF_H = 27;
+
 const $ = (id) => document.getElementById(id);
 const storage = new KomaStorage();
 const RATIOS = { '16:9': [16, 9], '9:16': [9, 16], '4:3': [4, 3], '1:1': [1, 1] };
 
+// Safe localStorage wrapper
+const storeGet = (key, fallback = '') => {
+  try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+};
+const storeSet = (key, val) => {
+  try { localStorage.setItem(key, val); } catch {}
+};
+const storeRemove = (key) => {
+  try { localStorage.removeItem(key); } catch {}
+};
+
 // ===== State =====
 let previewStream = null;
 let videoDevices = [];
-let selectedDeviceId = localStorage.getItem('komaclip_camera_id') || '';
+let selectedDeviceId = storeGet('komaclip_camera_id', '');
 let wakeLock = null;
-let selectedRatio = '9:16', W = 480, H = 854;
-let isRecording = false, isPaused = false, isCapturing = false;
-let elapsedMs = 0, lastTick = 0, nextShotTime = 0, worker = null, workerUrl = null;
+let selectedRatio = '9:16';
+let W = 480;
+let H = 854;
+let isRecording = false;
+let isPaused = false;
+let isCapturing = false;
+let elapsedMs = 0;
+let lastTick = 0;
+let currentIntervalMs = 10000;
+let nextShotTime = 0;
+let worker = null;
+let workerUrl = null;
 
 let frames = [];
 let droppedStillCount = 0;
-let prevDiffData = null;
+let prevLuma = null;
 let lastShotUrl = null;
+let lastStatKey = '';
 
 // ===== Offscreen Canvases =====
 const makeCanvas = (w = 0, h = 0, opt) => {
@@ -26,11 +53,11 @@ const makeCanvas = (w = 0, h = 0, opt) => {
   return [c, c.getContext('2d', opt)];
 };
 const [capCanvas, capCtx] = makeCanvas();
-const [diffCanvas, diffCtx] = makeCanvas(64, 36, { willReadFrequently: true });
+const [diffCanvas, diffCtx] = makeCanvas(DIFF_W, DIFF_H, { willReadFrequently: true });
 
 // ===== Helpers =====
 const setBadge = (cls, text) => {
-  $('badge').className = 'badge ' + cls;
+  $('badge').className = cls ? `badge ${cls}` : 'badge';
   $('badgeText').textContent = text;
 };
 
@@ -46,35 +73,100 @@ function getFps() {
   return Number($('fpsSelect').value || 15);
 }
 
-function updateStats() {
+function getNextIntervalMs() {
+  const val = $('intervalSelect').value;
+  if (val === 'random') {
+    const sec = Math.floor(Math.random() * (RANDOM_MAX_SEC - RANDOM_MIN_SEC + 1)) + RANDOM_MIN_SEC;
+    return sec * 1000;
+  }
+  return Number(val) || 10000;
+}
+
+function updateIntervalNote() {
+  const val = $('intervalSelect').value;
+  if (isRecording) {
+    const sec = Math.round(currentIntervalMs / 1000);
+    $('nextIntervalInfo').textContent = val === 'random'
+      ? `次回撮影間隔: ${sec}秒（10〜40秒ランダム）`
+      : `次回撮影間隔: ${sec}秒（固定）`;
+  } else {
+    $('nextIntervalInfo').textContent = val === 'random'
+      ? '次回撮影間隔: ランダム（10〜40秒）'
+      : `次回撮影間隔: ${Math.round(Number(val) / 1000)}秒（固定）`;
+  }
+}
+
+function updateStats(force = false) {
   const fps = getFps();
-  $('frameCount').innerHTML = `${frames.length}<span>枚</span>`;
-  $('elapsed').textContent = formatTime(elapsedMs);
-  $('estDuration').innerHTML = `${(frames.length / fps).toFixed(1)}<span>秒</span>`;
-  $('droppedCount').innerHTML = `${droppedStillCount}<span>枚</span>`;
-  $('psStats').textContent = `${frames.length}枚 ・ ${formatTime(elapsedMs)}`;
-  $('exportWebmBtn').textContent = `⬇ WebM書き出し (${frames.length}枚)`;
+  const timeStr = formatTime(elapsedMs);
+  const estStr = (frames.length / fps).toFixed(1);
+  const key = `${frames.length}|${timeStr}|${estStr}|${droppedStillCount}|${isRecording}`;
+  if (!force && key === lastStatKey) return;
+  lastStatKey = key;
+
+  $('frameCount').textContent = String(frames.length);
+  $('elapsed').textContent = timeStr;
+  $('estDuration').textContent = estStr;
+  $('droppedCount').textContent = String(droppedStillCount);
+  $('psStats').textContent = `${frames.length}枚 ・ ${timeStr}`;
+  $('exportWebmBtn').textContent = `WebM書き出し (${frames.length}枚)`;
   $('exportWebmBtn').disabled = isRecording || frames.length < 2;
 }
 
-// ===== UI: Sidebar, Tabs, Theme =====
-$('sidebarToggleBtn').onclick = () => $('appShell').classList.toggle('sidebar-collapsed');
-
-document.querySelectorAll('.nav-item').forEach(el => {
-  el.onclick = () => {
-    const tab = el.dataset.tab;
-    document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b === el));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${tab}`));
-  };
+// ===== In-Page Confirm Modal =====
+let confirmResolver = null;
+function askConfirm(title, message, okLabel = '実行') {
+  return new Promise((resolve) => {
+    confirmResolver = resolve;
+    $('confirmTitle').textContent = title;
+    $('confirmMessage').textContent = message;
+    $('confirmOkBtn').textContent = okLabel;
+    $('confirmModal').classList.add('open');
+  });
+}
+function closeConfirm(result) {
+  $('confirmModal').classList.remove('open');
+  if (confirmResolver) {
+    const r = confirmResolver;
+    confirmResolver = null;
+    r(result);
+  }
+}
+$('confirmOkBtn').addEventListener('click', () => closeConfirm(true));
+$('confirmCancelBtn').addEventListener('click', () => closeConfirm(false));
+$('confirmModal').addEventListener('click', (e) => {
+  if (e.target === $('confirmModal')) closeConfirm(false);
 });
 
-function applyTheme(t) {
-  document.documentElement.setAttribute('data-theme', t);
-  $('themeBtn').textContent = t === 'light' ? '☀️ ライト' : '🌙 ダーク';
-  localStorage.setItem('komaclip_theme', t);
+// ===== Settings Modal & Version =====
+$('appVersion').textContent = APP_VERSION;
+function setSettingsOpen(open) {
+  $('settingsModal').classList.toggle('open', open);
 }
-applyTheme(localStorage.getItem('komaclip_theme') || 'dark');
-$('themeBtn').onclick = () => applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+$('settingsBtn').addEventListener('click', () => setSettingsOpen(true));
+$('closeSettingsBtn').addEventListener('click', () => setSettingsOpen(false));
+$('settingsModal').addEventListener('click', (e) => {
+  if (e.target === $('settingsModal')) setSettingsOpen(false);
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    setSettingsOpen(false);
+    closeConfirm(false);
+  }
+});
+
+// ===== Theme (Monochrome Dark / Light) =====
+function applyTheme(t) {
+  const mode = t === 'light' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', mode);
+  $('themeBtn').textContent = mode === 'light' ? 'ライト' : 'ダーク';
+  storeSet('komaclip_theme', mode);
+}
+applyTheme(storeGet('komaclip_theme', 'dark'));
+$('themeBtn').addEventListener('click', () => {
+  const cur = document.documentElement.getAttribute('data-theme');
+  applyTheme(cur === 'light' ? 'dark' : 'light');
+});
 
 // ===== Ratio & Dimensions =====
 function calcOutputSize() {
@@ -89,17 +181,20 @@ function calcOutputSize() {
 
 function setRatio(ratio) {
   selectedRatio = RATIOS[ratio] ? ratio : '9:16';
-  $('ratioGroup').querySelectorAll('.ratio-btn').forEach(b => b.classList.toggle('active', b.dataset.ratio === selectedRatio));
+  $('ratioGroup').querySelectorAll('.ratio-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.ratio === selectedRatio);
+  });
   calcOutputSize();
   renderGuide();
 }
 
-$('resSelect').onchange = () => {
+$('resSelect').addEventListener('change', () => {
   if (isRecording) return;
   calcOutputSize();
   $('hint').textContent = `出力解像度を ${W}×${H} (${selectedRatio}) に変更しました`;
-};
-$('fpsSelect').onchange = updateStats;
+});
+$('fpsSelect').addEventListener('change', () => updateStats(true));
+$('intervalSelect').addEventListener('change', updateIntervalNote);
 
 $('ratioGroup').addEventListener('click', (e) => {
   const btn = e.target.closest('.ratio-btn');
@@ -107,32 +202,34 @@ $('ratioGroup').addEventListener('click', (e) => {
   setRatio(btn.dataset.ratio);
 });
 
-$('stillThreshold').oninput = () => {
+$('stillThreshold').addEventListener('input', () => {
   $('stillThVal').textContent = `感度 ${Number($('stillThreshold').value).toFixed(1)}`;
-};
+});
 
-// ===== Guides =====
+// ===== Monochrome Guides =====
 const GUIDE_SVGS = {
-  study: ['ノート・手元ガイド', `<rect x="260" y="160" width="1080" height="580" rx="18" fill="none" stroke="rgba(56,189,248,0.75)" stroke-width="3" stroke-dasharray="14 10"/><line x1="775" y1="450" x2="825" y2="450" stroke="#38bdf8" stroke-width="2.5"/><line x1="800" y1="425" x2="800" y2="475" stroke="#38bdf8" stroke-width="2.5"/>`],
-  thirds: ['三分割グリッド', `<line x1="533" y1="0" x2="533" y2="900" stroke="rgba(255,255,255,0.45)" stroke-width="2"/><line x1="1066" y1="0" x2="1066" y2="900" stroke="rgba(255,255,255,0.45)" stroke-width="2"/><line x1="0" y1="300" x2="1600" y2="300" stroke="rgba(255,255,255,0.45)" stroke-width="2"/><line x1="0" y1="600" x2="1600" y2="600" stroke="rgba(255,255,255,0.45)" stroke-width="2"/>`],
-  horizon: ['水平・中心線', `<line x1="0" y1="450" x2="1600" y2="450" stroke="rgba(56,189,248,0.75)" stroke-width="2.5"/><line x1="800" y1="0" x2="800" y2="900" stroke="rgba(255,255,255,0.4)" stroke-width="2" stroke-dasharray="10 10"/>`]
+  study: ['ノート・手元ガイド', '<rect x="260" y="160" width="1080" height="580" rx="14" fill="none" stroke="rgba(255,255,255,0.65)" stroke-width="2.5" stroke-dasharray="12 10"/><line x1="775" y1="450" x2="825" y2="450" stroke="rgba(255,255,255,0.8)" stroke-width="2"/><line x1="800" y1="425" x2="800" y2="475" stroke="rgba(255,255,255,0.8)" stroke-width="2"/>'],
+  thirds: ['三分割グリッド', '<line x1="533" y1="0" x2="533" y2="900" stroke="rgba(255,255,255,0.4)" stroke-width="2"/><line x1="1066" y1="0" x2="1066" y2="900" stroke="rgba(255,255,255,0.4)" stroke-width="2"/><line x1="0" y1="300" x2="1600" y2="300" stroke="rgba(255,255,255,0.4)" stroke-width="2"/><line x1="0" y1="600" x2="1600" y2="600" stroke="rgba(255,255,255,0.4)" stroke-width="2"/>'],
+  horizon: ['水平・中心線', '<line x1="0" y1="450" x2="1600" y2="450" stroke="rgba(255,255,255,0.65)" stroke-width="2"/><line x1="800" y1="0" x2="800" y2="900" stroke="rgba(255,255,255,0.4)" stroke-width="2" stroke-dasharray="10 10"/>']
 };
 function renderGuide() {
   const g = GUIDE_SVGS[$('guideSelect').value];
-  $('guideLabel').textContent = `▶ ${g ? g[0] : 'ガイドなし'} (${selectedRatio})`;
+  $('guideLabel').textContent = `${g ? g[0] : 'ガイドなし'} (${selectedRatio})`;
   $('guideLayer').innerHTML = g ? `<svg viewBox="0 0 1600 900" preserveAspectRatio="none">${g[1]}</svg>` : '';
 }
-$('guideSelect').onchange = renderGuide;
-$('toggleGuideBtn').onclick = () => {
+$('guideSelect').addEventListener('change', renderGuide);
+$('toggleGuideBtn').addEventListener('click', () => {
   $('guideSelect').value = $('guideSelect').value === 'off' ? 'study' : 'off';
   renderGuide();
-};
+});
+
 calcOutputSize();
 renderGuide();
+updateIntervalNote();
 
-// ===== Multi-Camera Enumeration & Selection (deviceId ベース) =====
+// ===== Multi-Camera Enumeration & Selection =====
 function getSelectedCameraLabel() {
-  const found = videoDevices.find(d => d.deviceId === selectedDeviceId);
+  const found = videoDevices.find((d) => d.deviceId === selectedDeviceId);
   if (found && found.label) return found.label;
   const opt = $('cameraSelect').selectedOptions[0];
   return opt ? opt.textContent : '既定カメラ';
@@ -141,28 +238,27 @@ function getSelectedCameraLabel() {
 async function refreshCameraList(requestPermissionIfHidden = false) {
   if (!navigator.mediaDevices?.enumerateDevices) return [];
 
-  let devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
-  const needsPermission = devices.length === 0 || devices.every(d => !d.deviceId || !d.label);
+  let devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+  const needsPermission = devices.length === 0 || devices.every((d) => !d.deviceId || !d.label);
 
-  // 権限未許可だとブラウザ仕様でカメラ名・IDが空になるため、明示操作時のみ一瞬開いて即閉じる
   if (requestPermissionIfHidden && needsPermission && navigator.mediaDevices?.getUserMedia) {
     let tmp = null;
     try {
       tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     } finally {
-      if (tmp) tmp.getTracks().forEach(t => t.stop());
+      if (tmp) tmp.getTracks().forEach((t) => t.stop());
     }
-    devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+    devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
   }
 
-  videoDevices = devices.filter(d => d.deviceId);
+  videoDevices = devices.filter((d) => d.deviceId);
   const sel = $('cameraSelect');
   sel.innerHTML = '';
 
   if (videoDevices.length === 0) {
     const opt = document.createElement('option');
     opt.value = '';
-    opt.textContent = 'カメラ未検出（「構図確認」または「一覧更新」で許可してください）';
+    opt.textContent = 'カメラ未検出（「構図確認」または「一覧更新」で許可）';
     sel.appendChild(opt);
     return videoDevices;
   }
@@ -174,30 +270,28 @@ async function refreshCameraList(requestPermissionIfHidden = false) {
     sel.appendChild(opt);
   });
 
-  // 保存済みIDがまだ存在するならそれを復元、なければ先頭カメラを選択
-  if (selectedDeviceId && videoDevices.some(d => d.deviceId === selectedDeviceId)) {
+  if (selectedDeviceId && videoDevices.some((d) => d.deviceId === selectedDeviceId)) {
     sel.value = selectedDeviceId;
   } else {
     selectedDeviceId = videoDevices[0].deviceId;
     sel.value = selectedDeviceId;
-    localStorage.setItem('komaclip_camera_id', selectedDeviceId);
+    storeSet('komaclip_camera_id', selectedDeviceId);
   }
-
   return videoDevices;
 }
 
-$('cameraSelect').onchange = async () => {
+$('cameraSelect').addEventListener('change', async () => {
   if (isRecording) return;
   selectedDeviceId = $('cameraSelect').value;
-  localStorage.setItem('komaclip_camera_id', selectedDeviceId);
+  storeSet('komaclip_camera_id', selectedDeviceId);
   $('hint').textContent = `使用カメラを変更しました: ${getSelectedCameraLabel()}`;
   if (previewStream) {
     stopPreviewStream();
     await togglePreviewCamera();
   }
-};
+});
 
-$('refreshCamListBtn').onclick = async () => {
+$('refreshCamListBtn').addEventListener('click', async () => {
   if (isRecording) return;
   try {
     const list = await refreshCameraList(true);
@@ -205,25 +299,23 @@ $('refreshCamListBtn').onclick = async () => {
       ? `カメラを ${list.length}台 検出しました（現在: ${getSelectedCameraLabel()}）`
       : '利用可能なカメラが見つかりませんでした';
   } catch (e) {
-    $('hint').textContent = 'カメラ一覧の取得に失敗: ' + e.message;
+    $('hint').textContent = `カメラ一覧の取得に失敗: ${e.message}`;
   }
-};
+});
 
-$('switchCamBtn').onclick = async () => {
+$('switchCamBtn').addEventListener('click', async () => {
   if (isRecording) return;
   try {
+    if (videoDevices.length < 2) await refreshCameraList(true);
     if (videoDevices.length < 2) {
-      await refreshCameraList(true);
-    }
-    if (videoDevices.length < 2) {
-      $('hint').textContent = `検出されたカメラは ${videoDevices.length}台 のみです（USB接続を確認してください）`;
+      $('hint').textContent = `検出されたカメラは ${videoDevices.length}台 のみです`;
       return;
     }
-    const curIdx = videoDevices.findIndex(d => d.deviceId === selectedDeviceId);
+    const curIdx = videoDevices.findIndex((d) => d.deviceId === selectedDeviceId);
     const nextIdx = (curIdx + 1) % videoDevices.length;
     selectedDeviceId = videoDevices[nextIdx].deviceId;
     $('cameraSelect').value = selectedDeviceId;
-    localStorage.setItem('komaclip_camera_id', selectedDeviceId);
+    storeSet('komaclip_camera_id', selectedDeviceId);
 
     if (previewStream) {
       stopPreviewStream();
@@ -232,9 +324,9 @@ $('switchCamBtn').onclick = async () => {
       $('hint').textContent = `カメラを切り替えました (${nextIdx + 1}/${videoDevices.length}): ${getSelectedCameraLabel()}`;
     }
   } catch (e) {
-    $('hint').textContent = 'カメラ切替エラー: ' + e.message;
+    $('hint').textContent = `カメラ切替エラー: ${e.message}`;
   }
-};
+});
 
 if (navigator.mediaDevices?.addEventListener) {
   navigator.mediaDevices.addEventListener('devicechange', () => {
@@ -242,15 +334,14 @@ if (navigator.mediaDevices?.addEventListener) {
   });
 }
 
-// ===== Camera Control (On-Demand Start & Immediate Stop) =====
+// ===== Camera Control =====
 function stopPreviewStream() {
   if (previewStream) {
-    previewStream.getTracks().forEach(t => t.stop());
+    previewStream.getTracks().forEach((t) => t.stop());
     previewStream = null;
   }
-  const preview = $('preview');
-  preview.srcObject = null;
-  $('connectCamBtn').textContent = '📷 構図確認（カメラON）';
+  $('preview').srcObject = null;
+  $('connectCamBtn').textContent = '構図確認（ON）';
 }
 
 async function openCameraStream() {
@@ -264,7 +355,7 @@ async function openCameraStream() {
   const videoConstraints = {
     width: { ideal: idealW },
     height: { ideal: idealH },
-    frameRate: { ideal: 30 }
+    frameRate: { ideal: 24 }
   };
   if (selectedDeviceId) {
     videoConstraints.deviceId = { exact: selectedDeviceId };
@@ -273,12 +364,11 @@ async function openCameraStream() {
   try {
     return await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
   } catch (err) {
-    // 選んだUSBカメラが抜けた等の場合は既定カメラへフォールバック
     if (selectedDeviceId && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError')) {
       selectedDeviceId = '';
-      localStorage.removeItem('komaclip_camera_id');
+      storeRemove('komaclip_camera_id');
       return await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: idealW }, height: { ideal: idealH }, frameRate: { ideal: 30 } },
+        video: { width: { ideal: idealW }, height: { ideal: idealH }, frameRate: { ideal: 24 } },
         audio: false
       });
     }
@@ -292,81 +382,82 @@ async function waitVideoReady(videoEl, timeoutMs = 3000) {
     if (performance.now() - start > timeoutMs) {
       throw new Error('カメラ映像の初期化がタイムアウトしました');
     }
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 50));
   }
 }
 
-// 構図確認用の手動ON/OFF（録画開始時は自動でOFFにして発熱防止）
 async function togglePreviewCamera() {
   if (isRecording) return;
   if (previewStream) {
     stopPreviewStream();
-    setBadge('', 'カメラ停止中');
-    $('hint').textContent = '構図確認カメラを停止しました（発熱・電力消費ゼロ）';
+    setBadge('', '待機中');
+    $('hint').textContent = '構図確認カメラを停止しました';
     return;
   }
   try {
-    $('hint').textContent = '構図確認のためカメラを起動中...';
+    $('hint').textContent = 'カメラを起動中...';
     previewStream = await openCameraStream();
     const preview = $('preview');
     preview.srcObject = previewStream;
     await preview.play();
     await waitVideoReady(preview);
 
-    // 実際に開いたカメラのIDを同期し、全カメラ名リストを最新化
     const activeId = previewStream.getVideoTracks()[0]?.getSettings()?.deviceId;
     if (activeId) {
       selectedDeviceId = activeId;
-      localStorage.setItem('komaclip_camera_id', activeId);
+      storeSet('komaclip_camera_id', activeId);
     }
     await refreshCameraList(false);
 
     $('lastShotImg').style.display = 'none';
     $('placeholder').style.display = 'none';
     $('camSleepBadge').style.display = 'none';
-    $('connectCamBtn').textContent = '⏹ 構図確認を終了（カメラOFF）';
+    $('connectCamBtn').textContent = '構図確認（OFF）';
     setBadge('', '構図確認中');
-    $('hint').textContent = `構図確認中: ${getSelectedCameraLabel()} — 別のカメラにする場合は上のリストか「次のカメラへ」で切替できます`;
+    $('hint').textContent = `構図確認中: ${getSelectedCameraLabel()}`;
   } catch (e) {
     stopPreviewStream();
     setBadge('', 'エラー');
-    $('hint').textContent = 'カメラ接続失敗: ' + e.message;
+    $('hint').textContent = `カメラ接続失敗: ${e.message}`;
   }
 }
-$('connectCamBtn').onclick = $('heroCamBtn').onclick = togglePreviewCamera;
+$('connectCamBtn').addEventListener('click', togglePreviewCamera);
+$('heroCamBtn').addEventListener('click', togglePreviewCamera);
 
-// ===== Crop & Motion Detection =====
+// ===== Lightweight Crop & Motion Detection =====
 function drawCroppedTo(videoEl, ctx, dstW, dstH) {
-  const vw = videoEl.videoWidth, vh = videoEl.videoHeight;
+  const vw = videoEl.videoWidth;
+  const vh = videoEl.videoHeight;
   if (!vw || !vh) return false;
-  const srcR = vw / vh, dstR = dstW / dstH;
+  const srcR = vw / vh;
+  const dstR = dstW / dstH;
   let sx = 0, sy = 0, sw = vw, sh = vh;
   if (srcR > dstR) { sw = vh * dstR; sx = (vw - sw) / 2; }
   else { sh = vw / dstR; sy = (vh - sh) / 2; }
   ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
+  ctx.imageSmoothingQuality = 'medium';
   ctx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, dstW, dstH);
   return true;
 }
 
 function evaluateMotion(videoEl) {
-  if (!drawCroppedTo(videoEl, diffCtx, 64, 36)) {
-    return { score: 100, snapshot: null };
+  if (!drawCroppedTo(videoEl, diffCtx, DIFF_W, DIFF_H)) {
+    return { score: 100, luma: null };
   }
-  const cur = diffCtx.getImageData(0, 0, 64, 36).data;
-  if (!prevDiffData) {
-    return { score: 100, snapshot: new Uint8ClampedArray(cur) };
-  }
+  const rgba = diffCtx.getImageData(0, 0, DIFF_W, DIFF_H).data;
+  const pixels = DIFF_W * DIFF_H;
+  const luma = new Uint8Array(pixels);
   let sum = 0;
-  for (let i = 0; i < cur.length; i += 4) {
-    const y1 = (cur[i] * 77 + cur[i + 1] * 150 + cur[i + 2] * 29) >> 8;
-    const y2 = (prevDiffData[i] * 77 + prevDiffData[i + 1] * 150 + prevDiffData[i + 2] * 29) >> 8;
-    sum += Math.abs(y1 - y2);
+
+  for (let p = 0, i = 0; p < pixels; p++, i += 4) {
+    const y = (rgba[i] * 77 + rgba[i + 1] * 150 + rgba[i + 2] * 29) >> 8;
+    luma[p] = y;
+    if (prevLuma) sum += Math.abs(y - prevLuma[p]);
   }
-  return { score: sum / (64 * 36), snapshot: new Uint8ClampedArray(cur) };
+  return { score: prevLuma ? sum / pixels : 100, luma };
 }
 
-// ===== One-Shot Capture (Start Camera -> Capture -> Stop Camera Immediately) =====
+// ===== One-Shot Intermittent Capture =====
 async function captureOneShotBurst() {
   if (isCapturing || !isRecording) return;
   isCapturing = true;
@@ -377,7 +468,7 @@ async function captureOneShotBurst() {
   tempVideo.playsInline = true;
 
   try {
-    $('camSleepBadge').textContent = '📸 カメラ起動・撮影中...';
+    $('camSleepBadge').textContent = '撮影中...';
     $('camSleepBadge').style.display = 'block';
 
     tempStream = await openCameraStream();
@@ -386,27 +477,26 @@ async function captureOneShotBurst() {
     await waitVideoReady(tempVideo);
 
     const warmupMs = Number($('warmupMsSelect')?.value || 600);
-    await new Promise(r => setTimeout(r, warmupMs));
-
+    await new Promise((r) => setTimeout(r, warmupMs));
     if (!isRecording) return;
 
-    const { score, snapshot } = evaluateMotion(tempVideo);
-    if (!snapshot) return;
+    const { score, luma } = evaluateMotion(tempVideo);
+    if (!luma) return;
 
     const autoDrop = $('autoDropStillCheck').checked;
     const threshold = Number($('stillThreshold').value);
 
-    if (autoDrop && prevDiffData && score < threshold) {
+    if (autoDrop && prevLuma && score < threshold) {
       droppedStillCount++;
-      updateStats();
-      $('hint').textContent = `🟠 静止画像を検知して破棄しました（動き差分: ${score.toFixed(2)} < ${threshold}）`;
+      updateStats(true);
+      $('hint').textContent = `静止画像を破棄しました（差分 ${score.toFixed(1)} < ${threshold}）`;
       return;
     }
 
     if (!drawCroppedTo(tempVideo, capCtx, W, H)) return;
-    prevDiffData = snapshot;
+    prevLuma = luma;
 
-    const blob = await new Promise(r => capCanvas.toBlob(r, 'image/jpeg', 0.90));
+    const blob = await new Promise((r) => capCanvas.toBlob(r, 'image/jpeg', 0.85));
     if (!blob) return;
 
     const frameElapsed = elapsedMs;
@@ -419,7 +509,8 @@ async function captureOneShotBurst() {
       $('dbStatus').textContent = 'メモリ保存中';
     }
 
-    frames.push({ id, blob, elapsedMs: frameElapsed });
+    // IndexedDBに保存できた場合はRAM上のBlobを解放して軽量化
+    frames.push({ id, blob: id ? null : blob, elapsedMs: frameElapsed });
 
     if (lastShotUrl) URL.revokeObjectURL(lastShotUrl);
     lastShotUrl = URL.createObjectURL(blob);
@@ -428,8 +519,9 @@ async function captureOneShotBurst() {
     imgEl.style.display = 'block';
     $('placeholder').style.display = 'none';
 
-    updateStats();
-    $('hint').textContent = `✅ コマ #${frames.length} 保存完了（動き差分: ${score.toFixed(1)}）→ カメラ即停止`;
+    updateStats(true);
+    const nextSec = Math.round(currentIntervalMs / 1000);
+    $('hint').textContent = `コマ #${frames.length} 保存完了（次回 約${nextSec}秒後）`;
 
     if (!$('powerSaveOverlay').classList.contains('active')) {
       const fl = $('flash');
@@ -438,14 +530,13 @@ async function captureOneShotBurst() {
       fl.classList.add('fire');
     }
   } catch (e) {
-    $('hint').textContent = '撮影エラー: ' + e.message;
+    $('hint').textContent = `撮影エラー: ${e.message}`;
   } finally {
-    if (tempStream) {
-      tempStream.getTracks().forEach(t => t.stop());
-    }
+    if (tempStream) tempStream.getTracks().forEach((t) => t.stop());
     tempVideo.srcObject = null;
     if (isRecording) {
-      $('camSleepBadge').textContent = '💤 カメラ停止中（次の撮影まで待機）';
+      const nextSec = Math.round(currentIntervalMs / 1000);
+      $('camSleepBadge').textContent = `カメラ停止中（次回 ${nextSec}秒後）`;
       $('camSleepBadge').style.display = 'block';
     } else {
       $('camSleepBadge').style.display = 'none';
@@ -454,15 +545,21 @@ async function captureOneShotBurst() {
   }
 }
 
-// ===== Worker Timer =====
+// ===== Lightweight 1Hz Worker Timer =====
 function stopWorkerTimer() {
   if (worker) { worker.terminate(); worker = null; }
   if (workerUrl) { URL.revokeObjectURL(workerUrl); workerUrl = null; }
 }
 
+function scheduleNextShot(now) {
+  currentIntervalMs = getNextIntervalMs();
+  nextShotTime = now + currentIntervalMs;
+  updateIntervalNote();
+}
+
 function startWorkerTimer() {
   stopWorkerTimer();
-  workerUrl = URL.createObjectURL(new Blob([`setInterval(() => postMessage(0), 250);`], { type: 'application/javascript' }));
+  workerUrl = URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 1000);'], { type: 'application/javascript' }));
   worker = new Worker(workerUrl);
   worker.onmessage = async () => {
     if (!isRecording || isPaused) return;
@@ -471,12 +568,12 @@ function startWorkerTimer() {
     lastTick = now;
     updateStats();
 
-    const interval = Number($('intervalSelect').value);
     const remain = Math.max(0, nextShotTime - now);
-    $('nextShotBar').style.width = Math.min(100, ((interval - remain) / interval) * 100) + '%';
+    const pct = Math.min(100, ((currentIntervalMs - remain) / currentIntervalMs) * 100);
+    $('nextShotBar').style.width = `${pct.toFixed(1)}%`;
 
     if (now >= nextShotTime && !isCapturing) {
-      nextShotTime = now + interval;
+      scheduleNextShot(now);
       await captureOneShotBurst();
     }
   };
@@ -491,7 +588,7 @@ function setCameraUiDisabled(disabled) {
   $('cameraSelect').disabled = disabled;
 }
 
-$('startBtn').onclick = async () => {
+$('startBtn').addEventListener('click', async () => {
   stopPreviewStream();
 
   try { await storage.clearAll(); } catch {}
@@ -503,20 +600,21 @@ $('startBtn').onclick = async () => {
 
   frames = [];
   droppedStillCount = 0;
-  prevDiffData = null;
+  prevLuma = null;
   elapsedMs = 0;
   isRecording = true;
   isPaused = false;
   lastTick = Date.now();
-  nextShotTime = lastTick + Number($('intervalSelect').value);
+  scheduleNextShot(lastTick);
 
   $('startBtn').disabled = true;
   setCameraUiDisabled(true);
-  $('pauseBtn').disabled = $('stopRecBtn').disabled = false;
+  $('pauseBtn').disabled = false;
+  $('stopRecBtn').disabled = false;
   $('exportCard').style.display = 'none';
   $('downloadLinks').innerHTML = '';
   setBadge('recording', '間欠録画中');
-  updateStats();
+  updateStats(true);
 
   if ('wakeLock' in navigator) {
     try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
@@ -524,21 +622,22 @@ $('startBtn').onclick = async () => {
 
   await captureOneShotBurst();
   startWorkerTimer();
-};
+});
 
-$('pauseBtn').onclick = () => {
+$('pauseBtn').addEventListener('click', () => {
   if (!isRecording) return;
   isPaused = !isPaused;
-  $('pauseBtn').textContent = isPaused ? '▶ 再開' : '⏸ 一時停止';
+  $('pauseBtn').textContent = isPaused ? '再開' : '一時停止';
   setBadge(isPaused ? 'paused' : 'recording', isPaused ? '一時停止' : '間欠録画中');
   if (!isPaused) {
     lastTick = Date.now();
-    nextShotTime = lastTick + Number($('intervalSelect').value);
+    scheduleNextShot(lastTick);
   }
-};
+});
 
-$('stopRecBtn').onclick = () => {
-  isRecording = isPaused = false;
+$('stopRecBtn').addEventListener('click', () => {
+  isRecording = false;
+  isPaused = false;
   stopWorkerTimer();
   $('nextShotBar').style.width = '0%';
   $('camSleepBadge').style.display = 'none';
@@ -546,32 +645,39 @@ $('stopRecBtn').onclick = () => {
 
   $('startBtn').disabled = false;
   setCameraUiDisabled(false);
-  $('pauseBtn').disabled = $('stopRecBtn').disabled = true;
-  $('pauseBtn').textContent = '⏸ 一時停止';
+  $('pauseBtn').disabled = true;
+  $('stopRecBtn').disabled = true;
+  $('pauseBtn').textContent = '一時停止';
   setBadge('done', '撮影完了');
-  updateStats();
+  updateIntervalNote();
+  updateStats(true);
 
   if (frames.length >= 2) {
     $('exportCard').style.display = 'grid';
-    $('hint').textContent = `撮影終了（採用 ${frames.length}枚 / 静止破棄 ${droppedStillCount}枚）。「WebM書き出し」で出力できます。`;
+    $('hint').textContent = `撮影終了（採用 ${frames.length}枚 / 破棄 ${droppedStillCount}枚）。WebM書き出しが可能です。`;
   } else {
     $('hint').textContent = '採用コマが2枚未満のため動画化できません。';
   }
-};
+});
 
-$('powerSaveBtn').onclick = () => $('powerSaveOverlay').classList.add('active');
-$('psExitBtn').onclick = $('powerSaveOverlay').ondblclick = () => $('powerSaveOverlay').classList.remove('active');
+$('powerSaveBtn').addEventListener('click', () => $('powerSaveOverlay').classList.add('active'));
+const exitPowerSave = () => $('powerSaveOverlay').classList.remove('active');
+$('psExitBtn').addEventListener('click', exitPowerSave);
+$('powerSaveOverlay').addEventListener('dblclick', exitPowerSave);
 
-// ===== Direct WebM Export (for External Video Editors) =====
+// ===== Streaming WebM Export =====
 const setProgress = (active, label = '', pct = 0) => {
   $('progressWrap').classList.toggle('active', active);
   $('progressLabel').textContent = label;
-  $('progressPct').textContent = Math.round(pct) + '%';
-  $('progressFill').style.width = pct + '%';
+  $('progressPct').textContent = `${Math.round(pct)}%`;
+  $('progressFill').style.width = `${pct}%`;
 };
 
-$('exportWebmBtn').onclick = async () => {
-  if (frames.length < 2) return alert('書き出すコマが2枚以上必要です');
+$('exportWebmBtn').addEventListener('click', async () => {
+  if (frames.length < 2) {
+    $('hint').textContent = '書き出すコマが2枚以上必要です';
+    return;
+  }
   $('exportWebmBtn').disabled = true;
   $('exportCard').style.display = 'grid';
 
@@ -586,20 +692,24 @@ $('exportWebmBtn').onclick = async () => {
       'video/webm;codecs=vp9',
       'video/webm;codecs=vp8',
       'video/webm'
-    ].find(m => MediaRecorder.isTypeSupported(m)) || '';
+    ].find((m) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)) || '';
 
     const stream = comp.captureStream(fps);
-    const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 6_000_000 } : {});
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 5_000_000 } : {});
     const chunks = [];
-    const done = new Promise(r => rec.onstop = r);
-    rec.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+    const done = new Promise((r) => { rec.onstop = r; });
+    rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
 
     rec.start();
     const delay = 1000 / fps;
     const t0 = performance.now();
 
     for (let i = 0; i < frames.length; i++) {
-      const bmp = await createImageBitmap(frames[i].blob);
+      const f = frames[i];
+      const blob = f.blob || (f.id != null ? await storage.getFrameBlob(f.id) : null);
+      if (!blob) continue;
+
+      const bmp = await createImageBitmap(blob);
       cctx.drawImage(bmp, 0, 0, W, H);
       bmp.close();
 
@@ -607,58 +717,66 @@ $('exportWebmBtn').onclick = async () => {
 
       const nextTarget = t0 + (i + 1) * delay;
       const waitMs = Math.max(0, nextTarget - performance.now());
-      await new Promise(r => setTimeout(r, waitMs));
+      await new Promise((r) => setTimeout(r, waitMs));
     }
 
-    await new Promise(r => setTimeout(r, delay));
+    await new Promise((r) => setTimeout(r, delay));
     rec.stop();
     await done;
 
-    const blob = new Blob(chunks, { type: mime || 'video/webm' });
-    if (blob.size === 0) throw new Error('WebMデータが0バイトになりました');
+    const outBlob = new Blob(chunks, { type: mime || 'video/webm' });
+    if (outBlob.size === 0) throw new Error('WebMデータが0バイトになりました');
 
     const a = Object.assign(document.createElement('a'), {
       className: 'dl-link',
-      href: URL.createObjectURL(blob),
+      href: URL.createObjectURL(outBlob),
       download: `komaclip_${Date.now()}.webm`,
-      textContent: `⬇ WebM をダウンロード (${(blob.size / 1024 / 1024).toFixed(2)} MB / ${frames.length}コマ)`
+      textContent: `WebMをダウンロード (${(outBlob.size / 1024 / 1024).toFixed(2)} MB / ${frames.length}コマ)`
     });
     $('downloadLinks').prepend(a);
     a.click();
     setBadge('done', 'WebM保存完了');
-    $('hint').textContent = 'WebMファイルを書き出しました。編集ソフトに読み込んで編集してください。';
+    $('hint').textContent = 'WebMファイルを書き出しました。';
   } catch (e) {
-    alert('WebM書き出しエラー: ' + e.message);
+    $('hint').textContent = `WebM書き出しエラー: ${e.message}`;
   } finally {
     comp.remove();
     setProgress(false);
-    $('exportWebmBtn').disabled = false;
+    $('exportWebmBtn').disabled = isRecording || frames.length < 2;
   }
-};
+});
 
 // ===== DB Clear & Startup =====
-$('settingsClearDbBtn').onclick = async () => {
-  if (!confirm('保存されている撮影データをすべて消去しますか？')) return;
+$('settingsClearDbBtn').addEventListener('click', async () => {
+  const ok = await askConfirm('データ消去', '保存されている撮影データをすべて消去しますか？', '消去する');
+  if (!ok) return;
   try { await storage.clearAll(); } catch {}
   frames = [];
   droppedStillCount = 0;
-  prevDiffData = null;
+  prevLuma = null;
   elapsedMs = 0;
   if (lastShotUrl) { URL.revokeObjectURL(lastShotUrl); lastShotUrl = null; }
   $('lastShotImg').style.display = 'none';
   $('placeholder').style.display = 'grid';
   $('exportCard').style.display = 'none';
   $('downloadLinks').innerHTML = '';
-  updateStats();
+  updateStats(true);
   $('dbStatus').textContent = '消去済み';
-};
+  $('hint').textContent = '保存データをすべて消去しました';
+  setSettingsOpen(false);
+});
 
 (async () => {
   try { await refreshCameraList(false); } catch {}
   try {
-    const restored = await storage.restoreAll();
+    const restored = await storage.restoreSummary();
     if (restored.frames.length > 0) {
-      if (confirm(`前回の未出力データ（${restored.frames.length}枚）が見つかりました。復元しますか？`)) {
+      const ok = await askConfirm(
+        '未出力データの復元',
+        `前回の未出力データ（${restored.frames.length}枚）が見つかりました。復元しますか？`,
+        '復元する'
+      );
+      if (ok) {
         frames = restored.frames;
         if (restored.meta) {
           if (restored.meta.selectedRatio) setRatio(restored.meta.selectedRatio);
@@ -666,14 +784,13 @@ $('settingsClearDbBtn').onclick = async () => {
           H = restored.meta.H || H;
           elapsedMs = restored.meta.elapsedMs || 0;
         }
-        const last = frames[frames.length - 1];
-        if (last?.blob) {
-          lastShotUrl = URL.createObjectURL(last.blob);
+        if (restored.lastBlob) {
+          lastShotUrl = URL.createObjectURL(restored.lastBlob);
           $('lastShotImg').src = lastShotUrl;
           $('lastShotImg').style.display = 'block';
           $('placeholder').style.display = 'none';
         }
-        updateStats();
+        updateStats(true);
         $('exportCard').style.display = 'grid';
         $('dbStatus').textContent = `復元済 (${frames.length}枚)`;
         setBadge('done', '復元完了');
