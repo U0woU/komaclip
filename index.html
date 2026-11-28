@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>KomaClip — 省電力タイムラプス撮影</title>
-  <link rel="stylesheet" href="./style.css?v=1.0.0">
+  <link rel="stylesheet" href="./style.css?v=1.0.2">
 </head>
 <body>
 <div class="app">
@@ -36,17 +36,27 @@
         <img id="lastShotImg" alt="最新撮影コマ">
 
         <div class="stage-placeholder" id="placeholder">
-          <h2>間欠タイムラプス撮影</h2>
-          <p>撮影の瞬間だけカメラを起動して即停止。静止コマを自動除外してWebMで書き出します。</p>
+          <h2>タイムラプス撮影</h2>
+          <p>静止コマを自動除外してWebMで書き出します。バックグラウンドでも安定して撮影できます。</p>
           <div class="btns" style="justify-content:center; margin-top:4px;">
             <button type="button" class="btn btn-primary" id="heroCamBtn">構図確認を開始</button>
           </div>
         </div>
 
-        <div class="cam-sleep-badge" id="camSleepBadge" style="display:none;">カメラ停止中（待機）</div>
+        <div class="cam-sleep-badge" id="camSleepBadge" style="display:none;">待機中</div>
         <div class="guide-layer" id="guideLayer"></div>
-        <div class="next-shot-bar" id="nextShotBar"></div>
         <div class="flash" id="flash"></div>
+      </div>
+
+      <!-- Black Progress Bar -->
+      <div class="shot-progress-wrap">
+        <div class="shot-progress-meta">
+          <span id="shotBarLabel">次の撮影まで</span>
+          <span id="shotBarRemain">--</span>
+        </div>
+        <div class="next-shot-track">
+          <div class="next-shot-bar" id="nextShotBar"></div>
+        </div>
       </div>
     </section>
 
@@ -87,6 +97,23 @@
       <div class="small-note" id="nextIntervalInfo">次回撮影間隔: ランダム（10〜40秒）</div>
     </aside>
   </main>
+
+  <!-- Manual Frame Strip (Opens ONLY when button is clicked) -->
+  <section class="card filmstrip-card" id="filmstripCard">
+    <div class="filmstrip-toolbar">
+      <div class="row-between" style="gap:10px;">
+        <span class="card-title">撮影コマ整理</span>
+        <span class="muted-text" id="filmstripSelectionInfo">0枚選択中</span>
+      </div>
+      <div class="btns">
+        <button type="button" class="btn" id="filmToggleExcludeBtn" disabled>一時削除 / 復元</button>
+        <button type="button" class="btn" id="filmDeleteBtn" disabled>完全削除</button>
+        <button type="button" class="btn btn-outline" id="filmClearSelBtn" disabled>選択解除</button>
+        <button type="button" class="btn btn-outline" id="closeFilmstripBtn">閉じる</button>
+      </div>
+    </div>
+    <div class="filmstrip-bar" id="filmstripBar"></div>
+  </section>
 
   <!-- Camera & Capture Settings -->
   <section class="card">
@@ -157,6 +184,7 @@
   <section class="card action-dock">
     <div class="btns">
       <button type="button" class="btn" id="connectCamBtn">構図確認（ON）</button>
+      <button type="button" class="btn" id="manageFramesBtn" disabled>コマ整理 (0枚)</button>
       <button type="button" class="btn" id="pauseBtn" disabled>一時停止</button>
       <button type="button" class="btn" id="stopRecBtn" disabled>撮影終了</button>
     </div>
@@ -199,7 +227,15 @@
     </div>
 
     <div class="field">
-      <label for="warmupMsSelect">カメラ起動後の露出安定待ち時間</label>
+      <label class="check-row">
+        <input type="checkbox" id="bgStableModeCheck" checked>
+        <span>バックグラウンド安定モード（推奨）</span>
+      </label>
+      <div class="small-note">別アプリや別ブラウザを開いていても撮影が止まらないよう、低FPSでカメラ接続と無音キープアライブを維持します。発熱を最優先したい場合はOFFにして間欠起動に切り替えられます。</div>
+    </div>
+
+    <div class="field">
+      <label for="warmupMsSelect">間欠起動時の露出安定待ち時間</label>
       <select id="warmupMsSelect">
         <option value="350">350ms（最短・省電力）</option>
         <option value="600" selected>600ms（標準・白飛び防止）</option>
@@ -216,9 +252,9 @@
     </div>
 
     <ul class="spec-list">
-      <li>間欠駆動：撮影時のみ起動し、1枚保存後に即座にカメラを停止します。</li>
+      <li>バックグラウンド対策：Web Workerタイマー・無音AudioContext・ImageCapture直接取得に対応。</li>
       <li>ランダム間隔：10秒〜40秒の範囲で毎コマ待機時間をランダム抽選します。</li>
-      <li>静止自動破棄：前回コマとの輝度差が小さい画像を保存せず破棄します。</li>
+      <li>手動コマ整理：「コマ整理」ボタンから不要画像の一時削除・復元・完全削除が可能です。</li>
     </ul>
   </div>
 </div>
@@ -240,11 +276,11 @@
 <!-- Power-Save Overlay -->
 <div id="powerSaveOverlay">
   <div class="ps-dot"></div>
-  <div>省電力モード稼働中（間欠撮影継続中）</div>
+  <div>省電力モード稼働中（撮影継続中）</div>
   <div class="ps-stats" id="psStats">0枚 ・ 00:00</div>
   <div class="ps-hint" id="psExitBtn">タップまたはダブルクリックで復帰</div>
 </div>
 
-<script type="module" src="./app.js?v=1.0.0"></script>
+<script type="module" src="./app.js?v=1.0.2"></script>
 </body>
 </html>

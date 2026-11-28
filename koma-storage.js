@@ -59,6 +59,7 @@ export class KomaStorage {
         const req = tx.objectStore('frames').add({
           blob,
           elapsedMs,
+          excluded: false,
           createdAt: Date.now()
         });
         req.onsuccess = () => resolve(req.result);
@@ -74,6 +75,38 @@ export class KomaStorage {
       const req = tx.objectStore('frames').get(id);
       req.onsuccess = () => resolve(req.result?.blob || null);
       req.onerror = () => reject(req.error);
+    });
+  }
+
+  deleteFrame(id) {
+    return this._enqueue(async () => {
+      const db = await this.init();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('frames', 'readwrite');
+        tx.objectStore('frames').delete(id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    });
+  }
+
+  setFrameExcluded(id, excluded) {
+    return this._enqueue(async () => {
+      const db = await this.init();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('frames', 'readwrite');
+        const store = tx.objectStore('frames');
+        const req = store.get(id);
+        req.onsuccess = () => {
+          const rec = req.result;
+          if (rec) {
+            rec.excluded = !!excluded;
+            store.put(rec);
+          }
+        };
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
     });
   }
 
@@ -100,9 +133,10 @@ export class KomaStorage {
         frames.push({
           id: r.id,
           blob: null,
+          excluded: !!r.excluded,
           elapsedMs: typeof r.elapsedMs === 'number' ? r.elapsedMs : frames.length * 10000
         });
-        lastBlob = r.blob || lastBlob;
+        if (!r.excluded && r.blob) lastBlob = r.blob;
         cursor.continue();
       };
       req.onerror = () => reject(req.error);
